@@ -1,0 +1,19 @@
+{
+    "comments": "",
+    "secret_key": "",
+    "account_address": "",
+    "multi_sig": {
+        "authorized_users": [
+            {
+                "comment": "signer 1",
+                "secret_key": "",
+                "account_address": ""
+            },
+            {
+                "comment": "signer 2",
+                "secret_key": "",
+                "account_address": ""
+            }
+        ]
+    }
+}
