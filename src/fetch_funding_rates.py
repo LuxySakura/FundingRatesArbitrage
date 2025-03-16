@@ -1,51 +1,67 @@
 import json
 import requests
 import pandas as pd
-import datetime
-import pytz
 import re
+import time
+import datetime
+from tqdm import tqdm  # 导入tqdm库
 
-default_obj = {'fundingRate': '0', 'nextFundingTime': 1739980800000}
+
 okx_url = "https://www.okx.com/api/v5/public/funding-rate"
+HL_MAINNET_URL = 'https://api.hyperliquid.xyz/info'  # HyperLiquid 主网 URL
+HL_TESTNET_URL = 'https://api.hyperliquid-testnet.xyz/info'  # HyperLiquid 测试网 URL
 
 
-def replace_none(value, default=default_obj):
-    return value if value is not None else default
+def replace_none(value):
+    _default = {
+        'fundingRate': None,
+        'nextFundingTime': None
+    }
+    return value if value is not None else _default
 
 
 def time_trans(raw_time):
     # 将毫秒转换为秒
     seconds = raw_time / 1000
-
-    # 转换为 UTC 时间
-    utc_time = datetime.datetime.fromtimestamp(seconds, datetime.UTC)
-
-    # 设置 UTC-8 时区
-    utc_minus_8 = pytz.timezone('Asia/Shanghai')  # UTC-8 时区
-
-    # 将 UTC 时间转换为 UTC-8 时间
-    utc_minus_8_time = utc_time.astimezone(utc_minus_8)
-    return utc_minus_8_time
+    
+    # 获取本地时区的时间结构
+    time_struct = time.localtime(seconds)
+    
+    # 格式化为datetime对象以保持返回类型一致
+    # 注意：这里我们仍然需要使用datetime来创建对象，因为time库本身不提供类似的对象
+    local_time = datetime.datetime(
+        time_struct.tm_year, time_struct.tm_mon, time_struct.tm_mday,
+        time_struct.tm_hour, time_struct.tm_min, time_struct.tm_sec
+    )
+    
+    return local_time
 
 
 def process_funding_rates(raw_data):
-    # 提取数据并构造DataFrame
+    """
+    提取数据并构造DataFrame
+    """
     rows = []
-    for item in data:
+    # 使用tqdm创建进度条，total参数设置为数据总长度
+    for item in tqdm(raw_data, desc="Fetch Funding Rates Data", unit="Tickers"):
         pair_name = item[0]  # 币对名
-        print("Current Ticker: " + pair_name)
+        print("\nCurrent Ticker: " + pair_name)
         pair_name = re.sub(r'^[a-z]+', '', pair_name)
 
+        # 获取OKX上该Ticker的FR & FT
         okx_funding_rate, okx_funding_time = fetch_okx_funding_rates(pair_name)
+        
+        # 获取 Binance 上该Ticker的 FR & FT 
+        bin_funding_rate = replace_none(item[1][0][1])['fundingRate']  # Binance Funding Rate
+        bin_funding_time = replace_none(item[1][0][1])['nextFundingTime']  # Binance next FundingTime
 
-        bin_funding_rate = float(replace_none(item[1][0][1])['fundingRate'])*100  # Binance Funding Rate
-        bin_funding_time = time_trans(replace_none(item[1][0][1])['nextFundingTime'])  # Binance next FundingTime
+        # 获取 HyperLiquid 上该Ticker的 FR & FT 
+        hl_funding_rate = item[1][1][1]['fundingRate']
+        hl_funding_time = item[1][1][1]['nextFundingTime']
 
-        hl_funding_rate = float(item[1][1][1]['fundingRate'])*100  # fundingRate
-        hl_funding_time = time_trans(item[1][1][1]['nextFundingTime'])  # nextFundingTime
-
-        bybit_funding_rate = float(replace_none(item[1][2][1])['fundingRate'])*100  # fundingRate
-        bybit_funding_time = time_trans(replace_none(item[1][2][1])['nextFundingTime'])  # nextFundingTime
+        # 获取 Bybit 上该Ticker的 FR & FT 
+        bybit_funding_rate = replace_none(item[1][2][1])['fundingRate']
+        bybit_funding_time = replace_none(item[1][2][1])['nextFundingTime']
 
         rows.append([
             pair_name,
@@ -59,27 +75,10 @@ def process_funding_rates(raw_data):
     df = pd.DataFrame(rows,
                       columns=['ticker', 'BinFR', 'BinFT', 'HlFR', 'HlFT', 'BybitFR', 'BybitFT', 'OkxFR', 'OkxFT'])
 
-    df = df[~((df['BinFR'] == 0) & (df['BybitFR'] == 0) & (df['OkxFR'] == 0))]
+    df['nextFT'] = df[['BinFT', 'HlFT', 'BybitFT', 'OkxFT']].min(axis=1)
 
-    df['BinHlFR'] = df['BinFR'] - df['HlFR']  # Binance 资金费率差
-    df['BybitHlFR'] = df['BybitFR'] - df['HlFR']  # Bybit 资金费率差
-    df['OkxHlFR'] = df['OkxFR'] - df['HlFR']  # OKX 资金费率差
-
-    df['maxFR'] = df[['BinFR', 'HlFR', 'BybitFR', 'OkxFR', 'BinHlFR', 'BybitHlFR', 'OkxHlFR']].abs().max(axis=1)
-
-    # # 创建目录（如果不存在）
-    # import os
-    # output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
-    # if not os.path.exists(output_dir):
-    #     os.makedirs(output_dir)
-    #     print(f"创建目录: {output_dir}")
-    # 
-    # # 保存为CSV文件
-    # output_file = os.path.join(output_dir, 'funding_data.csv')
-    # df.to_csv(output_file, index=False, encoding='utf-8')
-    # print(f"CSV文件已生成: {output_file}")
+    # 将生成的DataFrame保存为CSV文件
     df.to_csv('./data/funding_data.csv', index=False, encoding='utf-8')
-
     print("CSV文件已生成: funding_data.csv")
 
 
@@ -100,25 +99,20 @@ def fetch_okx_funding_rates(ticker):
 
             code = data['code']  # 获取响应的Code, code=0
             if code == '0':
-                fr = float(data['data'][0]['fundingRate']) * 100
-                ft = time_trans(int(data['data'][0]['fundingTime']))
-                
+                fr = data['data'][0]['fundingRate']
+                ft = int(data['data'][0]['fundingTime'])
             else:
-                fr = 0
-                ft = default_obj['nextFundingTime']
-                print("Ticker", ticker, "No Current Pair in OKX!")
-            print("Ticker", ticker, "==> FR:", fr, "FT:", ft)
+                fr = None
+                ft = None
             return fr, ft
-
         else:
             print(f"请求失败，状态码：{response.status_code}")
             print("响应内容：", response.text)  # 打印原始响应内容
-            return default_obj['fundingRate'], default_obj['nextFundingTime']
+            return None, None
 
     except requests.exceptions.RequestException as e:
         print(f"请求发生异常：{e}")
-
-        return default_obj['fundingRate'], default_obj['nextFundingTime']
+        return None, None
 
 
 if __name__ == '__main__':
@@ -130,7 +124,7 @@ if __name__ == '__main__':
         'type': "predictedFundings"
     }
 
-    response = requests.post('https://api.hyperliquid.xyz/info', headers=headers, data=json.dumps(body))
+    response = requests.post(HL_TESTNET_URL, headers=headers, data=json.dumps(body))
 
     # 检查请求是否成功
     if response.status_code == 200:
@@ -147,20 +141,6 @@ if __name__ == '__main__':
                       "nextFundingTime": 1733961600000
                     }
                   ],
-                  [
-                    "HlPerp",
-                    {
-                      "fundingRate": "0.0000125",
-                      "nextFundingTime": 1733958000000
-                    }
-                  ],
-                  [
-                    "BybitPerp",
-                    {
-                      "fundingRate": "0.0001",
-                      "nextFundingTime": 1733961600000
-                    }
-                  ]
                 ]
               ]
         """
