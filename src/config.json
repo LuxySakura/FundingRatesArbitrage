@@ -1,19 +1,5 @@
 {
     "comments": "",
-    "secret_key": "",
-    "account_address": "",
-    "multi_sig": {
-        "authorized_users": [
-            {
-                "comment": "signer 1",
-                "secret_key": "",
-                "account_address": ""
-            },
-            {
-                "comment": "signer 2",
-                "secret_key": "",
-                "account_address": ""
-            }
-        ]
-    }
+    "secret_key": "0x55f1e6e4f5f25d2cafab2d5b895fefd79191b276a161c27aa347513d8dbe3c83",
+    "account_address": "0x52aec9e53ecdee92de1690d4241850c1adb444db"
 }

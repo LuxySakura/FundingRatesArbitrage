@@ -229,16 +229,17 @@ def max_funding_rate(data):
     max_fr_idx = data['maxFR'].idxmax()
     print(data['maxFR'].describe())
     max_record = data.loc[max_fr_idx]
-    print("Best Funding Rate Arbitrage:", max_record)
+    print("Best Funding Rate Arbitrage:\n", max_record)
     _arb_platform = max_record['arb_obj']
     _hedge_platform = max_record['hedge_obj']
+    _ticker = max_record['ticker']
 
     _arb_obj, _hedge_obj = create_trading_pair(_arb_platform, _hedge_platform, max_record[f'{_arb_platform}FR'], max_record[f'{_hedge_platform}FR'])
     
     # Print Arbitrage Strategy
     _arb_obj.strategyState()
     _hedge_obj.strategyState()
-    return max_record['maxFR'], _arb_obj, _hedge_obj
+    return max_record['maxFR'], _arb_obj, _hedge_obj, _ticker
 
 
 if __name__ == '__main__':
@@ -246,12 +247,12 @@ if __name__ == '__main__':
     data = pd.read_csv(file_path)  # 读取数据
 
     # 计算最大资金费率以及具体套利策略
-    max_fr, arb, hedge = max_funding_rate(data)
+    max_fr, arb, hedge, ticker = max_funding_rate(data)
     max_fr = float(max_fr) * 100
-
+    # 估算日利润率
     estimate_day_rate = max_fr * 40
 
-    print("Max Funding Rate:", max_fr)
+    print("Max Funding Rate:", max_fr, "From:", ticker)
     print("Current Max Funding Rate(Per Hour):", max_fr, "%")
     print("Estimated Max Funding Rate(Per Day):", estimate_day_rate, "%")
     print("Estimated Max Funding Rate(Per Year):", estimate_day_rate * 365, "%")

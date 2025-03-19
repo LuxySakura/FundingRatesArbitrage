@@ -1,9 +1,9 @@
 index,name,maxLeverage,szDecimals
-0,SOL,3,2
+0,SOL,21,2
 1,APT,10,2
 2,ATOM,50,2
-3,BTC,50,5
-4,ETH,50,4
+3,BTC,40,5
+4,ETH,25,4
 5,MATIC,50,1
 6,BNB,50,3
 7,AVAX,50,2
@@ -11,7 +11,7 @@ index,name,maxLeverage,szDecimals
 9,DYDX,50,1
 10,APE,50,1
 11,OP,50,1
-12,kPEPE,3,0
+12,kPEPE,22,0
 13,ARB,50,1
 14,RLB,50,0
 15,WLD,10,1
