@@ -8,10 +8,6 @@ import json
 MARGIN_RATE = 0.1
 
 
-def place
-
-
-
 async def connet():
     base_uri = "wss://fstream.binance.com/ws/"
     mark_price_stream = "kaitousdt@markPrice"
