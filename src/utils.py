@@ -1,3 +1,8 @@
+from abc import ABC, abstractmethod
+
+POSITION_RISK = 0.01  # 风险度，每次开仓的保证金占比
+POSITION_LEVERAGE = 5  # 开仓杠杆
+
 # 创建交易平台API配置的抽象基类
 class ExchangeApiConfig(ABC):
     def __init__(self, is_mainnet=True):

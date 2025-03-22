@@ -16,7 +16,7 @@ sys_path.append(os_path.dirname(os_path.dirname(os_path.dirname(__file__))))
 # 导入日志模块
 from src.logging import setup_logger
 # 导入工具模块
-from src.utils import set_price, set_size, ExchangeApiConfig
+from src.utils import set_price, set_size, ExchangeApiConfig, POSITION_RISK, POSITION_LEVERAGE
 
 # 获取logger实例
 logger = setup_logger('HyperliquidTrading')
@@ -34,7 +34,6 @@ class HyperLiquidApiConfig(ExchangeApiConfig):
 
 # Hyperliquid中涉及的一些无需获取的全局常量
 MAX_DECIMALS = 6
-POSITION_PER = 0.005  # 开仓保证金占比
 MAINNET_API_URL = "https://api.hyperliquid.xyz"
 TESTNET_API_URL = "https://api.hyperliquid-testnet.xyz"
 """
@@ -119,7 +118,6 @@ def open_position_arb(net, side, ticker):
         net ==> Hyper Liquid的API URL(Mainnet/Testnet)
         _side ==> 开仓方向
         _ticker ==> 目标标的
-        _role ==> 仓位角色（套利方 True/对冲方 False）
     Output:
         _target_size ==> 套利方开仓张数
         _target_price ==> 套利方开仓价格
@@ -130,10 +128,11 @@ def open_position_arb(net, side, ticker):
     # 获取账户信息
     _info = Info(constants.TESTNET_API_URL, skip_ws=True)
     _user_state = _info.user_state(_address)
-    _vault_fund = float(_user_state['marginSummary']['totalRawUsd'])
-    logger.info(f"总保证金USD: {_vault_fund}")
 
-    _vault_fund = int(_vault_fund * POSITION_PER)  # 保证金(取整)
+    # 计算保证金
+    _vault_fund = float(_user_state['marginSummary']['totalRawUsd'])
+    _vault_fund = _vault_fund * POSITION_RISK  # 保证金(取整)
+    logger.info(f"总保证金USD: {_vault_fund}")
 
     # 根据Ticker获取Hyper Liquid Token Index
     df = pd.read_csv('./data/hl_ticker_index.csv')
@@ -144,7 +143,7 @@ def open_position_arb(net, side, ticker):
     _decimals = _target_record.iloc[0]['szDecimals']  # 获取该标的的小数位信息
     _max_leverage = _target_record.iloc[0]['maxLeverage']  # 获取当前标的最大可支持杠杆
     # 获取目标杠杆，取5和最大可支持杠杆中的最小值
-    _target_leverage = min(_max_leverage, 5)
+    _target_leverage = min(_max_leverage, POSITION_LEVERAGE)
 
     # 计算开仓价格/张数
     _target_price = retrieve_price(
@@ -197,6 +196,7 @@ def open_position_hedge(net, side, ticker, arb_size):
         net ==> Hyper Liquid的API URL(Mainnet/Testnet)
         side ==> 开仓方向
         ticker ==> 目标标的
+        arb_size ==> 套利方开仓张数
     Output:
         target_price ==> 对冲方开仓价格
     """
@@ -213,9 +213,9 @@ def open_position_hedge(net, side, ticker, arb_size):
     _decimals = _target_record.iloc[0]['szDecimals']  # 获取该标的的小数位信息
     _max_leverage = _target_record.iloc[0]['maxLeverage']  # 获取当前标的最大可支持杠杆
     # 获取目标杠杆，取5和最大可支持杠杆中的最小值
-    _target_leverage = min(_max_leverage, 5)
+    _target_leverage = min(_max_leverage, POSITION_LEVERAGE)
 
-    # 计算开仓价格/张数
+    # 计算开仓价格
     _target_price = retrieve_price(
         ticker=ticker, 
         base_url=base_url, 
@@ -224,9 +224,9 @@ def open_position_hedge(net, side, ticker, arb_size):
     )
 
     logger.info(
-        f"目标价格: {_target_price}, "
-        f"目标数量: {arb_size}, "
-        f"目标杠杆: {_target_leverage}"
+        f"对冲方开仓价格: {_target_price}, "
+        f"对冲方开仓数量: {arb_size}, "
+        f"对冲方开仓杠杆: {_target_leverage}"
     )
 
     # 创建Exchange类
