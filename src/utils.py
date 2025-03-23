@@ -42,7 +42,7 @@ def set_price(price, side, min_base_price):
     """
     # 将布尔值side转换为1或-1
     side_value = 1 if side else -1
-    return price - 20*min_base_price*side_value
+    return price - 100*min_base_price*side_value
 
 
 def set_size(amount, leverage, price, decimals):

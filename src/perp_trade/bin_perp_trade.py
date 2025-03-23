@@ -120,7 +120,6 @@ def adjust_lever(base_url, api_key, secret_key, symbol, lever):
 
     if res.status_code == 200:
         data = res.json()
-        logger.info(f"API请求成功: {data}")
         return 0
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
@@ -163,8 +162,6 @@ def query_user_data(base_url, api_key, secret_key):
         usdt_data = next((item for item in data['assets'] if item['asset'] == 'USDT'), None)
         if usdt_data:
             _available_balance = float(usdt_data['availableBalance'])
-            logger.info(f"账户信息: {usdt_data}")
-            
             return _available_balance
         else:
             logger.warning("未找到USDT资产信息")
@@ -195,7 +192,7 @@ def query_symbol_size(base_url, symbol):
         if symbol_data:
             # min_size_step = symbol_data['filters'][1]['stepSize']
             size_decimals = symbol_data['quantityPrecision']
-            logger.info(f"{symbol}最小数量变动: {size_decimals}")
+            # logger.info(f"{symbol}最小数量变动: {size_decimals}")
             return size_decimals
         else:
             logger.warning("未找到交易对信息")
@@ -204,6 +201,59 @@ def query_symbol_size(base_url, symbol):
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
         return -1
+
+
+def query_position(base_url, api_key, secret_key, symbol):
+    """
+    查询用户持仓
+    """
+    timestamp = get_server_time(base_url)
+
+    # 正确的API路径
+    url = base_url + '/fapi/v3/positionRisk'
+
+    headers = {
+        'X-MBX-APIKEY': api_key,
+    }
+
+    # 查询参数
+    params = {
+        'symbol': symbol,
+        'timestamp': timestamp,
+        'recvWindow': 3000,  # 增加接收窗口时间
+    }
+
+    # 生成签名
+    sign = generate_sign(secret_key, params)
+    params['signature'] = sign
+
+    # 使用GET请求而不是POST
+    res = requests.get(
+        url,  
+        headers=headers,
+        params=params  # 使用params而不是data
+    )
+    
+    if res.status_code == 200:
+        data = res.json()
+        logger.info(f"仓位信息: {data}")
+        open_price = float(data[0]['entryPrice'])
+        position_size = float(data[0]['positionAmt'])
+        logger.info(f"开仓价格: {open_price}, 持仓张数：{position_size}")
+        return open_price, position_size
+        # 查找asset为USDT的元素
+        # position = next((item for item in data['positions'] if item['symbol'] == symbol), None)
+        # if position:
+        #     size = position['positionAmt']
+        #     logger.info(f"仓位信息: {position}, 持仓张数：{size}")
+        #     return size
+        # else:
+        #     logger.warning("未找到仓位信息")
+        #     return -1
+    else:
+        logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
+        return -1, -1
+    # 查询参数
 
 
 async def retrieve_price(base_url, symbol, side):
@@ -235,14 +285,16 @@ async def retrieve_price(base_url, symbol, side):
                     # 计算小数位数
                     decimal_places = 0
                     if '.' in price_str:
-                        decimal_places = len(price_str.split('.')[1])
+                        # 去除尾随零后再计算小数位数
+                        decimal_part = price_str.split('.')[1].rstrip('0')
+                        decimal_places = len(decimal_part)
                     
                     # 计算最小价格变动
                     min_price_movement = 10 ** (-decimal_places)
                     
                     # 计算目标价格
                     target_price = set_price(price, side, min_price_movement)
-                    logger.info(f"目标价格: {target_price}")
+                    logger.info(f"当前价格: {price}; 目标价格: {target_price}")
                 else:
                     logger.error(f"API请求失败: 状态码 {data['status']}, 响应: {data}")
 
@@ -314,7 +366,7 @@ def open_position_arb(net, side, ticker):
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
 
-    target_perp = ticker+"USDC"  # 根据ticker构建出目标perp的币对
+    target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
     
     api_key, secret_key = fetch_api_key()
 
@@ -426,19 +478,78 @@ def close_position_arb(net, side, ticker):
     config = BinanceApiConfig(net)  # 构建对应网络的API配置
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
-    target_perp = ticker+"USDC"  # 根据ticker构建出目标perp的币对
+    target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
     api_key, secret_key = fetch_api_key()
 
-    # TODO 获取仓位信息（仓位大小）
+    # 获取仓位信息（仓位大小）
+    open_price, size = query_position(
+        rest_base_url,
+        api_key, secret_key,
+        target_perp
+    )
 
-    # TODO 计算平仓价格
+    # 计算平仓价格
+    target_price = asyncio.run(
+        retrieve_price(ws_base_url, target_perp, side)
+    )
 
-    # TODO 下单平仓
+    # 下单平仓
+    place_trade(
+        base_url=rest_base_url,
+        api_key=api_key, secret_key=secret_key,
+        price=target_price, side=side,
+        symbol=target_perp, size=size
+    )
 
     return 0
 
 
 def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
+    # 获取基础信息
+    config = BinanceApiConfig(net)  # 构建对应网络的API配置
+    rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
+    ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
+    target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
+    api_key, secret_key = fetch_api_key()
+
+    # 获取当前账户的仓位/开仓价格
+    hedge_open_price, hedge_size = query_position(
+        rest_base_url,
+        api_key, secret_key,
+        target_perp
+    )
+
+    # 计算当前市场价下的平仓价格
+    current_market_price = asyncio.run(
+        retrieve_price(ws_base_url, target_perp, side)
+    )
+    # 计算价格风险完全对冲的平仓价格
+    hedge_price = arb_close_price + hedge_open_price - arb_open_price
+
+    # 计算最终的平仓价格
+    if side:
+        # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
+        target_price = min(hedge_price, current_market_price)
+    else:
+        # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
+        target_price = max(hedge_price, current_market_price)
+    
+    logger.info(
+        f"市场价格: {current_market_price}, "
+        f"风险完全对冲价格: {hedge_price}, "
+        f"最终平仓价格: {target_price}, "
+        f"平仓数量: {hedge_size}, "
+        f"平仓方向: {side}"
+     )
+    
+    # 下单平仓
+    place_trade(
+        base_url=rest_base_url,
+        api_key=api_key, secret_key=secret_key,
+        price=target_price, side=side,
+        symbol=target_perp, size=hedge_size
+    )
+
     return 0
 
 # 下单 API: POST /fapi/v1/order（测试下单 API: POST /fapi/v1/order/test）
@@ -455,4 +566,8 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
 
 
 if __name__ == "__main__":
-    open_position_arb(False, True, "BTC")
+    # open_position_arb(False, True, "BTC")
+
+    # close_position_arb(False, False, "BTC")
+
+    close_position_hedge(False, False, "BTC", 20000, 19950)

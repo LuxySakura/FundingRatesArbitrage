@@ -34,13 +34,11 @@ class HyperLiquidApiConfig(ExchangeApiConfig):
 
 # Hyperliquid中涉及的一些无需获取的全局常量
 MAX_DECIMALS = 6
-MAINNET_API_URL = "https://api.hyperliquid.xyz"
-TESTNET_API_URL = "https://api.hyperliquid-testnet.xyz"
+# MAINNET_API_URL = "https://api.hyperliquid.xyz"
+# TESTNET_API_URL = "https://api.hyperliquid-testnet.xyz"
 """
     Hyper Liquid上进行永续合约开单操作
 """
-
-
 def fetch_account_address():
     # 获取config.json下的私钥，并获取account
     _config_path = os_path.join(os_path.dirname(__file__), "../config.json")
@@ -442,6 +440,7 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
 
 
 if __name__ == "__main__":
+    print("Hyper Liquid Trading Test")
     # arb_open_price, arb_size = open_position_arb(
     #     base_url=TESTNET_API_URL,
     #     side=False,
@@ -461,10 +460,10 @@ if __name__ == "__main__":
     #     arb_size=0.00025
     # )
 
-    close_position_hedge(
-        base_url=TESTNET_API_URL,
-        side=True,
-        ticker="BTC",
-        arb_open_price=10000,
-        arb_close_price=9979
-    )
+    # close_position_hedge(
+    #     base_url=TESTNET_API_URL,
+    #     side=True,
+    #     ticker="BTC",
+    #     arb_open_price=10000,
+    #     arb_close_price=9979
+    # )
