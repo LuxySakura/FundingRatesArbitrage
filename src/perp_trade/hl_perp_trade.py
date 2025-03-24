@@ -1,3 +1,17 @@
+"""
+该脚本实现在Hyper Liquid上进行合约开单操作
+
+描述:
+    主要功能包括：
+    - 套利方开仓/平仓
+    - 对冲方开仓/平仓
+    - 价格获取和订单管理
+
+作者: Luxy
+创建日期: 25/03/09
+版本: 1.0.0
+"""
+
 import requests
 import json
 from sys import path as sys_path
@@ -36,10 +50,15 @@ class HyperLiquidApiConfig(ExchangeApiConfig):
 MAX_DECIMALS = 6
 # MAINNET_API_URL = "https://api.hyperliquid.xyz"
 # TESTNET_API_URL = "https://api.hyperliquid-testnet.xyz"
-"""
-    Hyper Liquid上进行永续合约开单操作
-"""
+
 def fetch_account_address():
+    """从配置文件获取账户地址和私钥
+    
+    Returns:
+        tuple: 包含账户对象和地址的元组
+            - account (LocalAccount): 以太坊账户对象
+            - address (str): 账户地址
+    """
     # 获取config.json下的私钥，并获取account
     _config_path = os_path.join(os_path.dirname(__file__), "../config.json")
     with open(_config_path) as f:
@@ -55,6 +74,15 @@ def fetch_account_address():
 
 
 def cal_min_price_move(mark_price, decimals):
+    """计算最小价格变动单位
+    
+    Args:
+        mark_price (float): 标记价格
+        decimals (int): 数量精度
+        
+    Returns:
+        float: 最小价格变动单位
+    """
     # 根据获取的mark price, 以及szDecimals, 计算最小价格变动单位
     available_decimal = MAX_DECIMALS - decimals
     # 计算最小价格变动单位
@@ -62,15 +90,16 @@ def cal_min_price_move(mark_price, decimals):
 
 
 def retrieve_price(ticker, base_url, side, decimals):
-    """
-    获取Hyper Liquid上的永续合约信息
-    Input: 
-        ticker ==> 用于获取对应合约价格的目标标的
-        base_url ==> Hyper Liquid的API URL(Mainnet/Testnet)
-        side ==> 开仓方向
-        decimals ==> szDecimals
-    Output:
-       target_price ==> 开仓价格
+    """获取Hyper Liquid上的永续合约信息和目标价格
+    
+    Args:
+        ticker (str): 用于获取对应合约价格的目标标的
+        base_url (str): Hyper Liquid的API URL(Mainnet/Testnet)
+        side (bool): 交易方向，True为买入，False为卖出
+        decimals (int): 数量精度
+        
+    Returns:
+        float: 计算后的目标价格，失败时返回-1
     """
     url = base_url + '/info'
     headers = {
@@ -110,15 +139,17 @@ def retrieve_price(ticker, base_url, side, decimals):
 
 
 def open_position_arb(net, side, ticker):
-    """
-    Hyper Liquid 套利方开仓
-    Input:
-        net ==> Hyper Liquid的API URL(Mainnet/Testnet)
-        _side ==> 开仓方向
-        _ticker ==> 目标标的
-    Output:
-        _target_size ==> 套利方开仓张数
-        _target_price ==> 套利方开仓价格
+    """Hyper Liquid套利方开仓
+    
+    Args:
+        net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
+        side (bool): 开仓方向，True为买入开仓，False为卖出开仓
+        ticker (str): 目标标的，如"BTC"
+        
+    Returns:
+        tuple: 包含开仓价格和开仓数量的元组
+            - target_price (float): 套利方开仓价格
+            - target_size (float): 套利方开仓张数
     """
     _account, _address = fetch_account_address()
     base_url = HyperLiquidApiConfig(net).get_rest_url()
@@ -188,15 +219,16 @@ def open_position_arb(net, side, ticker):
 
 
 def open_position_hedge(net, side, ticker, arb_size):
-    """
-    Hyper Liquid 对冲方开仓
-    Input:
-        net ==> Hyper Liquid的API URL(Mainnet/Testnet)
-        side ==> 开仓方向
-        ticker ==> 目标标的
-        arb_size ==> 套利方开仓张数
-    Output:
-        target_price ==> 对冲方开仓价格
+    """Hyper Liquid对冲方开仓
+    
+    Args:
+        net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
+        side (bool): 开仓方向，True为买入开仓，False为卖出开仓
+        ticker (str): 目标标的，如"BTC"
+        arb_size (float): 套利方开仓张数
+        
+    Returns:
+        float: 对冲方开仓价格
     """
     _account, _address = fetch_account_address()
     _info = Info(constants.TESTNET_API_URL, skip_ws=True)
@@ -251,14 +283,15 @@ def open_position_hedge(net, side, ticker, arb_size):
 
 
 def close_position_arb(net, side, ticker):
-    """
-    Hyper Liquid 套利方平仓
+    """Hyper Liquid套利方平仓
+    
     Args:
-        net ==> Hyper Liquid的API URL(Mainnet/Testnet)
-        side ==> 套利方平仓方向
-        ticker ==> 套利方平仓标的
-    Output:
-        _target_price ==> 套利方平仓价格
+        net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
+        side (bool): 平仓方向，True为买入平仓，False为卖出平仓
+        ticker (str): 目标标的，如"BTC"
+        
+    Returns:
+        float: 套利方平仓价格，失败时返回-1
     """
     _account, _address = fetch_account_address()
     _info = Info(constants.TESTNET_API_URL, skip_ws=True)
@@ -337,15 +370,17 @@ def close_position_arb(net, side, ticker):
 
 
 def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
-    """
-    Hyper Liquid 对冲方平仓
-    Input:
-        net ==> Hyper Liquid的API URL(Mainnet/Testnet)
-        side ==> 开仓方向
-        ticker ==> 目标标的
-        arb_open_price ==> 套利方开仓价格
-        arb_close_price ==> 套利方平仓价格
-    Output:
+    """Hyper Liquid对冲方平仓
+    
+    Args:
+        net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
+        side (bool): 平仓方向，True为买入平仓，False为卖出平仓
+        ticker (str): 目标标的，如"BTC"
+        arb_open_price (float): 套利方开仓价格
+        arb_close_price (float): 套利方平仓价格
+        
+    Returns:
+        float: 对冲方平仓价格，失败时返回-1
     """
     _account, _address = fetch_account_address()
     _info = Info(constants.TESTNET_API_URL, skip_ws=True)

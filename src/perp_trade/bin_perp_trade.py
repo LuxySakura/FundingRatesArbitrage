@@ -1,3 +1,17 @@
+"""
+该脚本实现在Binance上进行合约开单操作
+
+描述:
+    主要功能包括：
+    - 套利方开仓/平仓
+    - 对冲方开仓/平仓
+    - 价格获取和订单管理
+
+作者: Luxy
+创建日期: 25/03/16
+版本: 1.0.0
+"""
+
 import websockets
 import asyncio
 import requests
@@ -37,7 +51,14 @@ class BinanceApiConfig(ExchangeApiConfig):
 
 
 def get_server_time(base_url):
-    """获取币安服务器时间"""
+    """获取币安服务器时间
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        
+    Returns:
+        int: 服务器时间戳(毫秒)，失败时返回本地时间
+    """
     response = requests.get(f"{base_url}/fapi/v1/time")
     if response.status_code == 200:
         return response.json()['serverTime']
@@ -47,8 +68,12 @@ def get_server_time(base_url):
 
 
 def fetch_api_key():
-    """
-    从config.json文件中获取对应的API Key
+    """从config.json文件中获取对应的API Key
+    
+    Returns:
+        tuple: 包含API Key和Secret Key的元组
+            - api_key (str): 币安API密钥
+            - secret_key (str): 币安API密钥对应的私钥
     """
     # 获取config.json下的私钥，并获取account
     _config_path = os_path.join(os_path.dirname(__file__), "../config.json")
@@ -62,16 +87,17 @@ def fetch_api_key():
 
 
 def generate_sign(api_secret, params):
-    """
-    生成签名，签名使用HMAC SHA256算法. 
-    API-KEY所对应的API-Secret作为 HMAC SHA256 的密钥，
+    """生成签名，签名使用HMAC SHA256算法
+    
+    API-KEY所对应的API-Secret作为HMAC SHA256的密钥，
     其他所有参数作为HMAC SHA256的操作对象，得到的输出即为签名。
     
-    Input:
-        api_secret: API-Secret密钥
-        params: 需要签名的参数字典
-    Output:
-        签名字符串
+    Args:
+        api_secret (str): API-Secret密钥
+        params (dict): 需要签名的参数字典
+        
+    Returns:
+        str: 生成的签名字符串
     """
     import hmac
     import hashlib
@@ -91,8 +117,17 @@ def generate_sign(api_secret, params):
 
 
 def adjust_lever(base_url, api_key, secret_key, symbol, lever):
-    """
-    调整杠杆
+    """调整杠杆倍数
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        api_key (str): 币安API密钥
+        secret_key (str): 币安API密钥对应的私钥
+        symbol (str): 交易对名称
+        lever (int): 杠杆倍数
+        
+    Returns:
+        int: 操作结果，0表示成功，-1表示失败
     """
     timestamp = get_server_time(base_url)
 
@@ -127,8 +162,15 @@ def adjust_lever(base_url, api_key, secret_key, symbol, lever):
 
 
 def query_user_data(base_url, api_key, secret_key):
-    """
-    查询用户数据，获取可用的保证金
+    """查询用户数据，获取可用的保证金
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        api_key (str): 币安API密钥
+        secret_key (str): 币安API密钥对应的私钥
+        
+    Returns:
+        float: 可用的USDT保证金余额，失败时返回-1
     """
     timestamp = get_server_time(base_url)
 
@@ -172,8 +214,14 @@ def query_user_data(base_url, api_key, secret_key):
 
 
 def query_symbol_size(base_url, symbol):
-    """
-    查询标的的最小价格变动和最小数量变动
+    """查询标的的最小价格变动和最小数量变动
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        symbol (str): 交易对名称
+        
+    Returns:
+        int: 交易对数量精度，失败时返回-1
     """
     # 正确的API路径
     url = base_url + '/fapi/v1/exchangeInfo'
@@ -204,8 +252,19 @@ def query_symbol_size(base_url, symbol):
 
 
 def query_position(base_url, api_key, secret_key, symbol):
-    """
-    查询用户持仓
+    """查询用户持仓信息
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        api_key (str): 币安API密钥
+        secret_key (str): 币安API密钥对应的私钥
+        symbol (str): 交易对名称
+        
+    Returns:
+        tuple: 包含开仓价格和持仓数量的元组
+            - open_price (float): 开仓价格
+            - position_size (float): 持仓数量
+            失败时返回(-1, -1)
     """
     timestamp = get_server_time(base_url)
 
@@ -257,8 +316,15 @@ def query_position(base_url, api_key, secret_key, symbol):
 
 
 async def retrieve_price(base_url, symbol, side):
-    """
-    获取 mark_price 数据
+    """获取标的当前价格并计算目标价格
+    
+    Args:
+        base_url (str): WebSocket API的基础URL
+        symbol (str): 交易对名称
+        side (bool): 交易方向，True为买入，False为卖出
+        
+    Returns:
+        float: 计算后的目标价格，失败时返回-1
     """
     target_price = -1
     async with websockets.connect(base_url) as websocket:
@@ -307,8 +373,19 @@ async def retrieve_price(base_url, symbol, side):
 
 
 def place_trade(base_url, api_key, secret_key, price, side, symbol, size):
-    """
-    下单
+    """下单交易
+    
+    Args:
+        base_url (str): 币安API的基础URL
+        api_key (str): 币安API密钥
+        secret_key (str): 币安API密钥对应的私钥
+        price (float): 下单价格
+        side (bool): 交易方向，True为买入，False为卖出
+        symbol (str): 交易对名称
+        size (float): 下单数量
+        
+    Returns:
+        int: 操作结果，0表示成功，-1表示失败
     """
     side_enum = "BUY" if side else "SELL"
 
@@ -352,15 +429,17 @@ def place_trade(base_url, api_key, secret_key, price, side, symbol, size):
 
 
 def open_position_arb(net, side, ticker):
-    """
-    Binance 套利方开仓
-    Input:
-        net ==> Binance的API URL(Mainnet/Testnet)
-        side ==> 开仓方向
-        ticker ==> 目标标的
-    Output:
-        target_size ==> 套利方开仓张数
-        target_price ==> 套利方开仓价格
+    """Binance套利方开仓
+    
+    Args:
+        net (bool): Binance的API URL类型，True为主网，False为测试网
+        side (bool): 开仓方向，True为买入开仓，False为卖出开仓
+        ticker (str): 目标标的，如"BTC"
+        
+    Returns:
+        tuple: 包含开仓价格和开仓数量的元组
+            - target_price (float): 套利方开仓价格
+            - target_size (float): 套利方开仓张数
     """
     config = BinanceApiConfig(net)  # 构建对应网络的API配置
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
@@ -418,15 +497,16 @@ def open_position_arb(net, side, ticker):
 
 
 def open_position_hedge(net, side, ticker, arb_size):
-    """
-    Binance 对冲方开仓
-    Input:
-        net ==> Binance的API URL(Mainnet/Testnet)
-        side ==> 开仓方向
-        ticker ==> 目标标的
-        arb_size ==> 套利方开仓张数
-    Output:
-        target_price ==> 对冲方开仓价格
+    """Binance对冲方开仓
+    
+    Args:
+        net (bool): Binance的API URL类型，True为主网，False为测试网
+        side (bool): 开仓方向，True为买入开仓，False为卖出开仓
+        ticker (str): 目标标的，如"BTC"
+        arb_size (float): 套利方开仓张数
+        
+    Returns:
+        float: 对冲方开仓价格
     """
     # 获取基础信息
     config = BinanceApiConfig(net)  # 构建对应网络的API配置
@@ -465,14 +545,15 @@ def open_position_hedge(net, side, ticker, arb_size):
 
 
 def close_position_arb(net, side, ticker):
-    """
-    Binance 套利方平仓
+    """Binance套利方平仓
+    
     Args:
-        net ==> Binance的API URL(Mainnet/Testnet)
-        side ==> 套利方平仓方向
-        ticker ==> 套利方平仓标的
-    Output:
-        close_price ==> 套利方平仓价格
+        net (bool): Binance的API URL类型，True为主网，False为测试网
+        side (bool): 平仓方向，True为买入平仓，False为卖出平仓
+        ticker (str): 目标标的，如"BTC"
+        
+    Returns:
+        int: 操作结果，0表示成功
     """
     # 获取基础信息
     config = BinanceApiConfig(net)  # 构建对应网络的API配置

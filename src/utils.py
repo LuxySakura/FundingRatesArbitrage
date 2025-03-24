@@ -39,6 +39,14 @@ def set_price(price, side, min_base_price):
     根据当前获取的价格，开单方向以及最小i多的最小价格变动单位，计算开单价格
     做多 需要 价格略低; 做空 需要 价格略高
     side为布尔值: True表示做多(相当于1), False表示做空(相当于-1)
+    
+    Args:
+        price (str): 当前市场订单簿最优价格
+        side (bool): 开仓方向
+        min_base_price (str): 最小价格变动单位
+        
+    Returns:
+        float: 目标价格
     """
     # 将布尔值side转换为1或-1
     side_value = 1 if side else -1
@@ -48,13 +56,15 @@ def set_price(price, side, min_base_price):
 def set_size(amount, leverage, price, decimals):
     """
     获取目标开仓张数
-    Input:
-        amount ==> 保证金额
-        leverage ==> 开仓杠杆
-        price ==> 开仓价格
-        decimal ==> szDecimals
-    Output:
-        target_size ==> 开仓张数
+
+    Args:
+        amount (float): 保证金额
+        leverage (int): 开仓杠杆
+        price (float): 开仓价格
+        decimal (int): szDecimals
+
+    Returns:
+        target_size (float): 开仓张数
     """
     # 获取目标开仓张数
     _target_size = (amount*leverage) / price  # 张数 = （保证金*杠杆）/开仓价格
