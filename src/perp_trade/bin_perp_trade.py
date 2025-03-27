@@ -67,9 +67,11 @@ def get_server_time(base_url):
         return int(time.time() * 1000)  # 失败时返回本地时间
 
 
-def fetch_api_key():
+def fetch_api_key(net):
     """从config.json文件中获取对应的API Key
     
+    Args:
+        net (bool): 是否为主网
     Returns:
         tuple: 包含API Key和Secret Key的元组
             - api_key (str): 币安API密钥
@@ -80,14 +82,19 @@ def fetch_api_key():
     with open(_config_path) as f:
         _config = json.load(f)
 
-    _api_key = _config["bin_testnet_api_key"]
-    _secret_key = _config["bin_testnet_secret_key"]
+    if net:  # 主网
+        _api_key = _config["bin_api_key"]
+        _secret_key = _config["bin_secret_key"]
+    else:  # 测试网
+        _api_key = _config["bin_testnet_api_key"]
+        _secret_key = _config["bin_testnet_secret_key"]
 
     return _api_key, _secret_key
 
 
 def generate_sign(api_secret, params):
-    """生成签名，签名使用HMAC SHA256算法
+    """
+    生成签名，签名使用HMAC SHA256算法
     
     API-KEY所对应的API-Secret作为HMAC SHA256的密钥，
     其他所有参数作为HMAC SHA256的操作对象，得到的输出即为签名。
@@ -162,7 +169,8 @@ def adjust_lever(base_url, api_key, secret_key, symbol, lever):
 
 
 def query_user_data(base_url, api_key, secret_key):
-    """查询用户数据，获取可用的保证金
+    """
+    查询用户数据，获取可用的保证金
     
     Args:
         base_url (str): 币安API的基础URL
@@ -447,7 +455,7 @@ def open_position_arb(net, side, ticker):
 
     target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
     
-    api_key, secret_key = fetch_api_key()
+    api_key, secret_key = fetch_api_key(net)
 
     # 查询账户余额
     fund = query_user_data(
@@ -513,7 +521,7 @@ def open_position_hedge(net, side, ticker, arb_size):
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
     target_perp = ticker+"USDC"  # 根据ticker构建出目标perp的币对
-    api_key, secret_key = fetch_api_key()
+    api_key, secret_key = fetch_api_key(net)
 
     # 调整目标标的杠杆
     adjust_lever(
@@ -560,7 +568,7 @@ def close_position_arb(net, side, ticker):
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
     target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
-    api_key, secret_key = fetch_api_key()
+    api_key, secret_key = fetch_api_key(net)
 
     # 获取仓位信息（仓位大小）
     open_price, size = query_position(
@@ -586,12 +594,24 @@ def close_position_arb(net, side, ticker):
 
 
 def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
+    """Binance对冲方平仓
+    
+    Args:
+        net (bool): Binance的API URL类型，True为主网，False为测试网
+        side (bool): 平仓方向，True为买入平仓，False为卖出平仓
+        ticker (str): 目标标的，如"BTC"
+        arb_open_price (float): 套利方开仓价格
+        arb_close_price (float): 套利方平仓价格
+        
+    Returns:
+        int: 操作结果，0表示成功
+    """
     # 获取基础信息
     config = BinanceApiConfig(net)  # 构建对应网络的API配置
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
     target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
-    api_key, secret_key = fetch_api_key()
+    api_key, secret_key = fetch_api_key(net)
 
     # 获取当前账户的仓位/开仓价格
     hedge_open_price, hedge_size = query_position(

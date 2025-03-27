@@ -68,6 +68,7 @@ def set_size(amount, leverage, price, decimals):
     """
     # 获取目标开仓张数
     _target_size = (amount*leverage) / price  # 张数 = （保证金*杠杆）/开仓价格
+    print(f"raw target_size: {_target_size}")
     # 根据szDecimals规范化大小
     _target_size = round(_target_size, int(decimals))
     # 转换为字符串，确保精度正确
