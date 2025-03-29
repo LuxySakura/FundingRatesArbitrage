@@ -17,10 +17,10 @@ class Platform(Enum):
     """
     交易平台枚举类型，包含平台名称和对应的手续费率
     """
-    HYPERLIQUID = ("Hl", 0.0001)  # Hyperliquid平台手续费率, 0.01%
-    OKX = ("Okx", 0.0002)  # OKX平台手续费率，0.02%
-    BINANCE = ("Bin", 0.00018)  # Binance平台手续费率，0.018%
-    BYBIT = ("Bybit", 0.00016)  # Bybit平台手续费率，0.018%
+    HYPERLIQUID = ("Hl", 0.0002)  # Hyperliquid平台手续费率, 0.01%
+    OKX = ("Okx", 0.0004)  # OKX平台手续费率，0.02%
+    BINANCE = ("Bin", 0.00036)  # Binance平台手续费率，0.018%
+    BYBIT = ("Bybit", 0.00036)  # Bybit平台手续费率，0.018%
     UNKNOWN = ("", 0.0)
     
     def __init__(self, code, fee):
@@ -167,7 +167,7 @@ def next_ft_filter(_row):
         hedge_obj = TradingStrategy(lowest_fee_platform, not side)
         
         # 计算净收益
-        max_fr = abs(fr_value) - arb_platform.fee - lowest_fee_platform.fee
+        max_fr = 3*abs(fr_value) - arb_platform.fee - lowest_fee_platform.fee
         
         return make_result(max_fr, arb_platform, lowest_fee_platform)
     
@@ -182,7 +182,7 @@ def next_ft_filter(_row):
     for i, (p1, fr1, fee1) in enumerate(platform_data):
         for p2, fr2, fee2 in platform_data[i+1:]:
             # 计算净收益
-            fr_diff = abs(fr1 - fr2)
+            fr_diff = 3*abs(fr1 - fr2)
             net_profit = fr_diff - fee1 - fee2
             
             if net_profit > max_profit:
@@ -249,11 +249,10 @@ if __name__ == '__main__':
     # 计算最大资金费率以及具体套利策略
     max_fr, arb, hedge, ticker = max_funding_rate(data)
     max_fr = float(max_fr) * 100
-    # 估算日利润率
-    estimate_day_rate = max_fr * 40
+    # 估算日利润率: max_fr * 日执行次数 * 资金杠杆
+    estimate_day_rate = max_fr * 12 * 5
 
     print("Max Funding Rate:", max_fr, "From:", ticker)
-    print("Current Max Funding Rate(Per Hour):", max_fr, "%")
     print("Estimated Max Funding Rate(Per Day):", estimate_day_rate, "%")
     print("Estimated Max Funding Rate(Per Year):", estimate_day_rate * 365, "%")
     print("Profit Per Hour:", 7.3 * max_fr * U_FUND/100, "￥")

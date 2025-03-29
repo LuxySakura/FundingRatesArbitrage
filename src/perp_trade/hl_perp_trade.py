@@ -28,7 +28,7 @@ from eth_account.signers.local import LocalAccount
 # 添加项目根目录到系统路径，确保可以导入src目录下的模块
 sys_path.append(os_path.dirname(os_path.dirname(os_path.dirname(__file__))))
 # 导入日志模块
-from src.logging import setup_logger
+from src.logger import setup_logger
 # 导入工具模块
 from src.utils import set_price, set_size, ExchangeApiConfig, POSITION_RISK, POSITION_LEVERAGE
 
