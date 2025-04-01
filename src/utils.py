@@ -76,3 +76,50 @@ def set_size(amount, leverage, price, decimals):
     # 转回浮点数，去除多余的0
     _target_size = float(_target_size_str)
     return _target_size
+
+
+def genearate_history_moments(interval, batch, days):
+    """
+    生成过去特定时间段内通过API获取历史数据的时间戳节点
+    例如，如果要获取过去一周内的数据，由于获取的K线数据的时间间隔为1分钟，
+    则需要获取7 * 24 * 60 = 10080个时间戳节点，
+    每次最多获取100条，如果每次API获取的时间段为1min * 60，
+    需要获取7 * 24次，本函数需要为每一次生成对应的起始时间戳，以便后续调用。
+    函数返回一个列表，列表中每个元素为一个元组，元组中包含起始时间戳和结束时间戳。
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    # 设置参数
+    max_records_per_request = interval * batch  # 每次API请求获取60条记录
+    
+    # 计算当前时间并对齐到最近的分钟边界
+    current_time = datetime.now().replace(second=0, microsecond=0)
+    end_time = current_time
+    time_segments = []
+    
+    # 计算总共需要获取的时间段数量
+    total_minutes = days * 24 * 60
+    total_segments = total_minutes // max_records_per_request
+    if total_minutes % max_records_per_request > 0:
+        total_segments += 1
+    
+    # 生成每个时间段的起始和结束时间戳
+    for i in range(total_segments):
+        # 计算当前段的结束时间
+        if i == 0:
+            segment_end_time = end_time
+        else:
+            segment_end_time = segment_start_time
+        
+        # 计算当前段的起始时间（确保对齐到分钟边界）
+        segment_start_time = segment_end_time - timedelta(minutes=max_records_per_request)
+        
+        # 转换为时间戳（毫秒）
+        start_timestamp = int(segment_start_time.timestamp() * 1000)
+        end_timestamp = int(segment_end_time.timestamp() * 1000)
+        
+        # 添加到结果列表
+        time_segments.append((start_timestamp, end_timestamp))
+    
+    return time_segments
