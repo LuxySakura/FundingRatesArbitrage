@@ -1,5 +1,5 @@
 """
-OKX 历史数据获取脚本
+Binance 历史数据获取脚本
 """
 import requests
 import json
@@ -18,19 +18,11 @@ from src.logger import setup_logger
 from src.utils import genearate_history_moments
 
 # 获取logger实例
-logger = setup_logger('OKXHistoryDataFetching')
+logger = setup_logger('BinanceHistoryDataFetching')
 
-BASE_URL = "https://www.okx.com"
+BASE_URL = "https://fapi.binance.com"
 
-# 流动性数据
-# - timestamp
-# - side (bid & ask)
-# - price 
-# - volume
 
-# 资金费率数据
-# - timestamp
-# - funding_rate
 def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
@@ -52,8 +44,8 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
     # 确保目录存在
     os.makedirs(csv_dir, exist_ok=True)
     
-    # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"okx_{symbol.replace('-', '_')}_1m.csv"
+    # CSV文件名：bin_symbol_1m.csv
+    csv_filename = f"bin_{symbol}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
@@ -72,9 +64,8 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
         logger.error(f"K线数据文件不存在: {csv_path}，请先运行fetch_history_mark_price_candles获取K线数据")
         return None
 
-    # GET /api/v5/public/funding-rate-history
     method = 'GET'
-    request_path = '/api/v5/public/funding-rate-history'
+    request_path = '/fapi/v1/fundingRate'
     url = BASE_URL + request_path
     
     funding_rates_data = []  # 存储所有资金费率数据
@@ -86,9 +77,9 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
         start = segments[i][0]
         end = segments[i][1]
         body = {
-            'instId': symbol,
-            'after': end,
-            'before': start,
+            'symbol': symbol,
+            'endTime': end,
+            'startTime': start,
             'limit': '24',
         }
         
@@ -116,10 +107,7 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
             )
             
             if res.status_code == 200:
-                msg = res.json()
-                data = msg['data']
-                # realizedRate 实际资金费率
-                # method: current_period/next_period(当期收/跨期收)
+                data = res.json()
                
                 if data and len(data) > 0:
                     # 将数据添加到列表中
@@ -133,7 +121,7 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
                             'timestamp': adjusted_timestamp,  # 使用调整后的时间戳
                             'funding_rate': float(item['fundingRate'])
                         })
-                        logger.info(f"资金费时间: {datetime.fromtimestamp(int(item['fundingTime']) / 1000.0)}")
+                        logger.info(f"资金费时间: {datetime.fromtimestamp(adjusted_timestamp / 1000.0)}")
                     logger.info(f"获取到 {len(data)} 条资金费率数据")
                 else:
                     logger.warning(f"该时间段未获取到数据")
@@ -163,14 +151,14 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
         
         # 合并资金费率数据到K线数据
         # 1. 如果K线数据中已有funding_rate列，先删除
-        if 'okxFR' in candle_data.columns:
-            candle_data = candle_data.drop('okxFR', axis=1)
+        if 'binFR' in candle_data.columns:
+            candle_data = candle_data.drop('binFR', axis=1)
         
         # 2. 创建一个新的DataFrame，用于存储合并后的数据
         merged_df = candle_data.copy()
         
         # 3. 初始化funding_rate列为NaN
-        merged_df['okxFR'] = float('nan')
+        merged_df['binFR'] = float('nan')
         
         # 4. 对于每个资金费率记录，找到对应时间戳的K线数据并更新
         for _, row in funding_df.iterrows():
@@ -179,16 +167,12 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
             
             if len(matching_indices) > 0:
                 # 更新对应K线的资金费率
-                merged_df.loc[matching_indices, 'okxFR'] = row['funding_rate']
-                logger.info(f"精确匹配时间戳 {row['timestamp']} 的资金费率: {row['funding_rate']}")
+                merged_df.loc[matching_indices, 'binFR'] = row['funding_rate']
+                logger.info(f"精确匹配时间戳 {datetime.fromtimestamp(int(row['timestamp']) / 1000.0)} 的资金费率: {row['funding_rate']}")
             else:
                 logger.warning(f"未找到精确匹配的时间戳 {row['timestamp']} 对应的K线数据")
         
-        # 5. 不再进行前向填充，因为需要精确匹配时间戳
-        # 删除所有funding_rate为NaN的行（可选，根据需求决定）
-        # merged_df = merged_df.dropna(subset=['funding_rate'])
-        
-        logger.info(f"合并后共有 {len(merged_df)} 条记录，其中 {merged_df['okxFR'].notna().sum()} 条有精确匹配的资金费率数据")
+        logger.info(f"合并后共有 {len(merged_df)} 条记录，其中 {merged_df['binFR'].notna().sum()} 条有精确匹配的资金费率数据")
         
         # 保存到CSV
         if save_to_csv:
@@ -203,7 +187,7 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
 
 def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
     """
-    获取历史mark price数据并保存到CSV文件
+    获取历史K线数据并保存到CSV文件
     
     参数:
         symbol: 交易对，如'BTC-USDT-SWAP'
@@ -221,12 +205,12 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
     # 确保目录存在
     os.makedirs(csv_dir, exist_ok=True)
     
-    # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"okx_{symbol.replace('-', '_')}_1m.csv"
+    # CSV文件名：bin_symbol_1m.csv
+    csv_filename = f"bin_{symbol}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 定义列名
-    columns = ['timestamp', 'okxOpen', 'okxHigh', 'okxLow', 'okxClose', 'okxVolume', 'okxVolCcy', 'okxVolCcyQuote', 'confirm']
+    columns = ['timestamp', 'binOpen', 'binHigh', 'binLow', 'binClose', 'binVolume']
     
     # 读取现有CSV文件(如果存在)
     existing_data = None
@@ -239,7 +223,7 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
     
     # GET /api/v5/market/history-mark-price-candles
     method = 'GET'
-    request_path = '/api/v5/market/history-candles'
+    request_path = '/fapi/v1/klines'
     url = BASE_URL + request_path
     
     all_new_data = []  # 存储所有新获取的数据
@@ -251,10 +235,10 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
         start = segments[i][0]
         end = segments[i][1]
         body = {
-            'instId': symbol,
-            'after': end,
-            'before': start,
-            'bar': '1m',
+            'symbol': symbol,
+            'endTime': end,
+            'startTime': start,
+            'interval': '1m',
             'limit': '60',
         }
         logger.info(f"获取时间段数据: start={datetime.fromtimestamp(start / 1000.0)}, end={datetime.fromtimestamp(end / 1000.0)}")
@@ -283,15 +267,15 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
             )
             
             if res.status_code == 200:
-                msg = res.json()
-                data = msg['data']
-                # 返回数组顺序：[ts,o,h,l,c,vol,volCcy,volCcyQuote,confirm]
+                data = res.json()
                 
                 if data and len(data) > 0:
-                    # 将数据添加到列表中，同时转换timestamp为int类型
+                    # 将数据添加到列表中，同时只保留前6个元素（开盘时间到成交量）
                     for item in data:
-                        item[0] = int(item[0])  # 转换timestamp列为int
-                    all_new_data.extend(data)
+                        # 只保留前6个元素
+                        truncated_item = item[:6]
+                        truncated_item[0] = int(truncated_item[0])  # 转换timestamp列为int
+                        all_new_data.append(truncated_item)
                     logger.info(f"获取到 {len(data)} 条K线数据")
                 else:
                     logger.warning(f"该时间段未获取到数据: start={start}, end={end}")
@@ -320,6 +304,14 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
         
         # 如果存在现有数据，合并新旧数据
         if existing_data is not None:
+            # 确保列名匹配
+            if set(existing_data.columns) != set(columns + ['datetime']):
+                # 如果列名不匹配，可能是旧版本数据，只保留需要的列
+                if set(columns).issubset(set(existing_data.columns)):
+                    existing_data = existing_data[columns]
+                    # 重新添加datetime列
+                    existing_data['datetime'] = pd.to_datetime(existing_data['timestamp'], unit='ms')
+            
             # 确保现有数据也有datetime列
             if 'datetime' not in existing_data.columns:
                 existing_data['datetime'] = pd.to_datetime(existing_data['timestamp'], unit='ms')
@@ -364,14 +356,10 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
         logger.warning("未获取到任何新数据")
         return existing_data if existing_data is not None else pd.DataFrame(columns=columns)
 
+if __name__ == "__main__":
+    symbol = "BTCUSDT"
+    # segments = genearate_history_moments(interval=1, batch=60, days=3)
+    # data = fetch_history_mark_price_candles(symbol, segments)
 
-if __name__ == '__main__':
-    print("开始采集数据")
-    days = 3  # 要收集的天数
-    symbol = 'BTC-USDT-SWAP'  # 要采集的symbol
-    
-    k_history_segments = genearate_history_moments(interval=1, batch=60, days=days)
-    fetch_history_mark_price_candles(symbol=symbol, segments=k_history_segments)
-
-    fr_segments = genearate_history_moments(interval=60, batch=24, days=days)
+    fr_segments = genearate_history_moments(interval=60, batch=24, days=3)
     fetch_histroy_funding_rates(symbol=symbol, segments=fr_segments)

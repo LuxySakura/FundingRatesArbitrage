@@ -86,6 +86,11 @@ def genearate_history_moments(interval, batch, days):
     每次最多获取100条，如果每次API获取的时间段为1min * 60，
     需要获取7 * 24次，本函数需要为每一次生成对应的起始时间戳，以便后续调用。
     函数返回一个列表，列表中每个元素为一个元组，元组中包含起始时间戳和结束时间戳。
+
+    Args:
+        interval (int): 时间间隔，单位为分钟
+        batch (int): 每次API请求获取的记录数
+        days (int): 持续天数
     """
     import time
     from datetime import datetime, timedelta
