@@ -31,7 +31,7 @@ BASE_URL = "https://www.okx.com"
 # 资金费率数据
 # - timestamp
 # - funding_rate
-def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
+def okx_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
     
@@ -82,7 +82,7 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
     # 实现限速控制 - 使用滑动窗口跟踪最近的请求时间
     request_times = deque(maxlen=20)  # 最多保存20个请求时间
     
-    for i in range(len(segments) - 1):
+    for i in range(len(segments)):
         start = segments[i][0]
         end = segments[i][1]
         body = {
@@ -91,6 +91,11 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
             'before': start,
             'limit': '24',
         }
+
+        if i == 0:
+            logger.info(f"数据采集始于: {datetime.fromtimestamp(end / 1000.0)}")
+        elif i == len(segments)-2:
+            logger.info(f"数据采集止于: {datetime.fromtimestamp(start / 1000.0)}")
         
         # 限速控制 - 如果已经有20个请求在最近2秒内发出，则等待
         current_time = time.time()
@@ -118,8 +123,6 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
             if res.status_code == 200:
                 msg = res.json()
                 data = msg['data']
-                # realizedRate 实际资金费率
-                # method: current_period/next_period(当期收/跨期收)
                
                 if data and len(data) > 0:
                     # 将数据添加到列表中
@@ -133,8 +136,6 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
                             'timestamp': adjusted_timestamp,  # 使用调整后的时间戳
                             'funding_rate': float(item['fundingRate'])
                         })
-                        logger.info(f"资金费时间: {datetime.fromtimestamp(int(item['fundingTime']) / 1000.0)}")
-                    logger.info(f"获取到 {len(data)} 条资金费率数据")
                 else:
                     logger.warning(f"该时间段未获取到数据")
             else:
@@ -180,13 +181,8 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
             if len(matching_indices) > 0:
                 # 更新对应K线的资金费率
                 merged_df.loc[matching_indices, 'okxFR'] = row['funding_rate']
-                logger.info(f"精确匹配时间戳 {row['timestamp']} 的资金费率: {row['funding_rate']}")
             else:
-                logger.warning(f"未找到精确匹配的时间戳 {row['timestamp']} 对应的K线数据")
-        
-        # 5. 不再进行前向填充，因为需要精确匹配时间戳
-        # 删除所有funding_rate为NaN的行（可选，根据需求决定）
-        # merged_df = merged_df.dropna(subset=['funding_rate'])
+                logger.warning(f"未找到精确匹配的时间戳 {datetime.fromtimestamp(int(row['timestamp']) / 1000.0)} 对应的K线数据")
         
         logger.info(f"合并后共有 {len(merged_df)} 条记录，其中 {merged_df['okxFR'].notna().sum()} 条有精确匹配的资金费率数据")
         
@@ -201,7 +197,7 @@ def fetch_histroy_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None
         return candle_data
 
 
-def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
+def okx_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
     """
     获取历史mark price数据并保存到CSV文件
     
@@ -247,17 +243,21 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
     # 实现限速控制 - 使用滑动窗口跟踪最近的请求时间
     request_times = deque(maxlen=20)  # 最多保存20个请求时间
     
-    for i in range(len(segments) - 1):
+    for i in range(len(segments)):
         start = segments[i][0]
         end = segments[i][1]
         body = {
             'instId': symbol,
             'after': end,
-            'before': start,
+            # 'before': start,
             'bar': '1m',
             'limit': '60',
         }
-        logger.info(f"获取时间段数据: start={datetime.fromtimestamp(start / 1000.0)}, end={datetime.fromtimestamp(end / 1000.0)}")
+
+        if i == 0:
+            logger.info(f"数据采集始于: {datetime.fromtimestamp(end / 1000.0)}")
+        elif i == len(segments)-1:
+            logger.info(f"数据采集止于: {datetime.fromtimestamp(start / 1000.0)}")
         
         # 限速控制 - 如果已经有20个请求在最近2秒内发出，则等待
         current_time = time.time()
@@ -292,7 +292,7 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
                     for item in data:
                         item[0] = int(item[0])  # 转换timestamp列为int
                     all_new_data.extend(data)
-                    logger.info(f"获取到 {len(data)} 条K线数据")
+                    logger.info(f"该时间段共获取到 {len(data)} 条记录")
                 else:
                     logger.warning(f"该时间段未获取到数据: start={start}, end={end}")
             else:
@@ -348,7 +348,6 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
             # 如果没有现有数据，直接保存新数据
             # 按时间排序
             new_df = new_df.sort_values('timestamp')
-            
             # 重置索引
             new_df = new_df.reset_index(drop=True)
             
@@ -367,11 +366,12 @@ def fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir
 
 if __name__ == '__main__':
     print("开始采集数据")
-    days = 3  # 要收集的天数
+    days = 1  # 要收集的天数
     symbol = 'BTC-USDT-SWAP'  # 要采集的symbol
     
     k_history_segments = genearate_history_moments(interval=1, batch=60, days=days)
-    fetch_history_mark_price_candles(symbol=symbol, segments=k_history_segments)
+    okx_fetch_history_mark_price_candles(symbol=symbol, segments=k_history_segments)
 
-    fr_segments = genearate_history_moments(interval=60, batch=24, days=days)
-    fetch_histroy_funding_rates(symbol=symbol, segments=fr_segments)
+    # fr_segments = genearate_history_moments(interval=60, batch=24, days=days)
+    # logger.info(f"共获取到 {len(fr_segments)} 个时间片段: {fr_segments}")
+    # okx_fetch_histroy_funding_rates(symbol=symbol, segments=fr_segments)
