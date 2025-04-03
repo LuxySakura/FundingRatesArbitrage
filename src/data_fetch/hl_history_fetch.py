@@ -369,4 +369,4 @@ if __name__ == "__main__":
     hl_fetch_history_mark_price_candles(symbol, segments)
 
     fr_segments = genearate_history_moments(interval=60, batch=24, days=1)
-    hl_fetch_histroy_funding_rates(symbol, fr_segments)
+    hl_fetch_history_funding_rates(symbol, fr_segments)
