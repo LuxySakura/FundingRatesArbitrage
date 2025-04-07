@@ -80,7 +80,7 @@ def analyze_unmatched_timestamp():
     # 找出每个交易所独有的时间戳
     okx_unique = hl_timestamps.union(okx_timestamps) - okx_timestamps
     bin_unique = bin_timestamps - (okx_timestamps.union(hl_timestamps))
-    hl_unique = hl_timestamps - (okx_timestamps.union(bin_timestamps))
+    hl_unique = hl_timestamps.union(bin_timestamps) - bin_timestamps
     
     # 打印结果
     print(f"OKX独有的时间戳数量: {len(okx_unique)}")

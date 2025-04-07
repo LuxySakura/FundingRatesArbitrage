@@ -23,16 +23,17 @@ logger = setup_logger('BinanceHistoryDataFetching')
 BASE_URL = "https://fapi.binance.com"
 
 
-def bin_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
+def bin_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
     
-    参数:
+    Args:
         symbol: 交易对，如'BTC-USDT-SWAP'
+        segments: 时间Segments
         save_to_csv: 是否保存到CSV文件
         csv_dir: CSV文件保存目录，默认为项目根目录下的data/candles目录
     
-    返回:
+    Return:
         合并了资金费率的K线数据
     """
 
@@ -45,7 +46,7 @@ def bin_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：bin_symbol_1m.csv
-    csv_filename = f"bin_{symbol}_1m.csv"
+    csv_filename = f"bin_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
@@ -187,7 +188,7 @@ def bin_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=
         return candle_data
 
 
-def bin_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
+def bin_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史K线数据并保存到CSV文件
     
@@ -208,7 +209,7 @@ def bin_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：bin_symbol_1m.csv
-    csv_filename = f"bin_{symbol}_1m.csv"
+    csv_filename = f"bin_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 定义列名

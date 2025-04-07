@@ -23,7 +23,7 @@ logger = setup_logger('HyperLiquidHistoryDataFetching')
 BASE_URL = "https://api.hyperliquid.xyz"
 
 
-def hl_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
+def hl_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
     
@@ -45,7 +45,7 @@ def hl_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=N
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：bin_symbol_1m.csv
-    csv_filename = f"hl_{symbol}_1m.csv"
+    csv_filename = f"hl_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
@@ -192,7 +192,7 @@ def hl_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=N
     return -1
 
 
-def hl_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
+def hl_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
      # 设置CSV文件保存路径
     if csv_dir is None:
         # 默认保存到项目根目录下的data/candles目录
@@ -202,7 +202,7 @@ def hl_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：bin_symbol_1m.csv
-    csv_filename = f"hl_{symbol}_1m.csv"
+    csv_filename = f"hl_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 定义列名
@@ -345,6 +345,7 @@ def hl_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_
             # 按时间排序
             new_df = new_df.sort_values('timestamp')
             
+            new_df = new_df.drop_duplicates(subset=['timestamp'])
             # 重置索引
             new_df = new_df.reset_index(drop=True)
             

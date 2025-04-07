@@ -31,7 +31,7 @@ BASE_URL = "https://www.okx.com"
 # 资金费率数据
 # - timestamp
 # - funding_rate
-def okx_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
+def okx_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
     
@@ -53,7 +53,7 @@ def okx_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"okx_{symbol.replace('-', '_')}_1m.csv"
+    csv_filename = f"okx_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
@@ -197,7 +197,7 @@ def okx_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=
         return candle_data
 
 
-def okx_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
+def okx_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史mark price数据并保存到CSV文件
     
@@ -218,7 +218,7 @@ def okx_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"okx_{symbol.replace('-', '_')}_1m.csv"
+    csv_filename = f"okx_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 定义列名
@@ -292,7 +292,6 @@ def okx_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv
                     for item in data:
                         item[0] = int(item[0])  # 转换timestamp列为int
                     all_new_data.extend(data)
-                    logger.info(f"该时间段共获取到 {len(data)} 条记录")
                 else:
                     logger.warning(f"该时间段未获取到数据: start={start}, end={end}")
             else:

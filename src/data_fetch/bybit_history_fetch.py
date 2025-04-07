@@ -31,7 +31,7 @@ BASE_URL = "https://api.bybit.com"
 # 资金费率数据
 # - timestamp
 # - funding_rate
-def bybit_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_dir=None):
+def bybit_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史资金费率数据并与K线数据合并
     
@@ -52,8 +52,8 @@ def bybit_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_di
     # 确保目录存在
     os.makedirs(csv_dir, exist_ok=True)
     
-    # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"bybit_{symbol}_1m.csv"
+    # CSV文件名
+    csv_filename = f"bybit_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
@@ -128,7 +128,6 @@ def bybit_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_di
                     logger.error(f"API请求失败: {msg['retMsg']}")
                     continue
                 else:
-                    logger.info(f"API结果：{msg}")
                     data = msg['result']['list']
                 
                     if data and len(data) > 0:
@@ -204,7 +203,7 @@ def bybit_fetch_history_funding_rates(symbol, segments, save_to_csv=True, csv_di
         return candle_data
 
 
-def bybit_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, csv_dir=None):
+def bybit_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
     """
     获取历史mark price数据并保存到CSV文件
     
@@ -225,7 +224,7 @@ def bybit_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, c
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"bybit_{symbol}_1m.csv"
+    csv_filename = f"bybit_{ticker}_1m.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 定义列名
@@ -304,7 +303,6 @@ def bybit_fetch_history_mark_price_candles(symbol, segments, save_to_csv=True, c
                         for item in data:
                             item[0] = int(item[0])  # 转换timestamp列为int
                         all_new_data.extend(data)
-                        # logger.info(f"该时间段共获取到 {len(data)} 条记录")
                     else:
                         logger.warning(f"该时间段未获取到数据: start={start}, end={end}")
             else:
