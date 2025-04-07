@@ -176,7 +176,7 @@ def fetch_funding_rates():
     # 记录开始时间
     # start_time = time.time()
     
-    response = requests.post(HL_TESTNET_URL, headers=headers, data=json.dumps(body))
+    response = requests.post(HL_MAINNET_URL, headers=headers, data=json.dumps(body))
 
     # 检查请求是否成功
     if response.status_code == 200:

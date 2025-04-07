@@ -254,7 +254,7 @@ if __name__ == '__main__':
 
     print("Max Funding Rate:", max_fr, "From:", ticker)
     print("Estimated Max Funding Rate(Per Day):", estimate_day_rate, "%")
-    print("Estimated Max Funding Rate(Per Year):", estimate_day_rate * 365, "%")
-    print("Profit Per Hour:", 7.3 * max_fr * U_FUND/100, "￥")
+    print("Estimated Max Funding Rate(Per Year):", pow(1.033, 365), "%")
+    print("Profit Per Day:", 7.3 * max_fr * U_FUND/100 * 30, "￥")
 
     # TODO: 计算时间，并执行交易
