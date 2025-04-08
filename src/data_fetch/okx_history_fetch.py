@@ -47,30 +47,24 @@ def okx_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, 
     # 设置CSV文件保存路径
     if csv_dir is None:
         # 默认保存到项目根目录下的data/candles目录
-        csv_dir = os.path.join(os_path.dirname(os_path.dirname(os_path.dirname(__file__))), 'data', 'candles')
+        csv_dir = os.path.join(os_path.dirname(os_path.dirname(os_path.dirname(__file__))), 'data', 'fundingRates')
     
     # 确保目录存在
     os.makedirs(csv_dir, exist_ok=True)
     
     # CSV文件名：okx_symbol_1m.csv
-    csv_filename = f"okx_{ticker}_1m.csv"
+    csv_filename = f"okx_{ticker}_fr.csv"
     csv_path = os.path.join(csv_dir, csv_filename)
     
     # 读取现有K线CSV文件(如果存在)
-    candle_data = None
+    existing_data = None
     if os.path.exists(csv_path):
         try:
-            candle_data = pd.read_csv(csv_path)
-            logger.info(f"读取现有K线CSV文件: {csv_path}, 包含 {len(candle_data)} 条记录")
-            # 确保datetime列存在
-            if 'datetime' not in candle_data.columns:
-                candle_data['datetime'] = pd.to_datetime(candle_data['timestamp'], unit='ms')
+            existing_data = pd.read_csv(csv_path)
+            logger.info(f"读取现有资金费率CSV文件: {csv_path}, 包含 {len(existing_data)} 条记录")
         except Exception as e:
             logger.error(f"读取CSV文件失败: {str(e)}")
             return None
-    else:
-        logger.error(f"K线数据文件不存在: {csv_path}，请先运行fetch_history_mark_price_candles获取K线数据")
-        return None
 
     # GET /api/v5/public/funding-rate-history
     method = 'GET'
@@ -123,7 +117,6 @@ def okx_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, 
             if res.status_code == 200:
                 msg = res.json()
                 data = msg['data']
-               
                 if data and len(data) > 0:
                     # 将数据添加到列表中
                     for item in data:
@@ -158,43 +151,55 @@ def okx_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, 
         # 将资金费率数据转换为DataFrame
         funding_df = pd.DataFrame(funding_rates_data)
         
-        # 将timestamp转换为datetime格式，方便排序和查看
-        
         logger.info(f"共获取到 {len(funding_df)} 条资金费率记录")
+
+        # 将timestamp转换为datetime格式，方便排序和查看
+        funding_df['datetime'] = pd.to_datetime(funding_df['timestamp'], unit='ms')
         
-        # 合并资金费率数据到K线数据
-        # 1. 如果K线数据中已有funding_rate列，先删除
-        if 'okxFR' in candle_data.columns:
-            candle_data = candle_data.drop('okxFR', axis=1)
-        
-        # 2. 创建一个新的DataFrame，用于存储合并后的数据
-        merged_df = candle_data.copy()
-        
-        # 3. 初始化funding_rate列为NaN
-        merged_df['okxFR'] = float('nan')
-        
-        # 4. 对于每个资金费率记录，找到对应时间戳的K线数据并更新
-        for _, row in funding_df.iterrows():
-            # 精确匹配时间戳
-            matching_indices = merged_df[merged_df['timestamp'] == row['timestamp']].index
+        # 如果存在现有数据，合并新旧数据
+        if existing_data is not None:
+            # 确保现有数据也有datetime列
+            if 'datetime' not in existing_data.columns:
+                existing_data['datetime'] = pd.to_datetime(existing_data['timestamp'], unit='ms')
             
-            if len(matching_indices) > 0:
-                # 更新对应K线的资金费率
-                merged_df.loc[matching_indices, 'okxFR'] = row['funding_rate']
-            else:
-                logger.warning(f"未找到精确匹配的时间戳 {datetime.fromtimestamp(int(row['timestamp']) / 1000.0)} 对应的K线数据")
-        
-        logger.info(f"合并后共有 {len(merged_df)} 条记录，其中 {merged_df['okxFR'].notna().sum()} 条有精确匹配的资金费率数据")
-        
-        # 保存到CSV
-        if save_to_csv:
-            merged_df.to_csv(csv_path, index=False)
-            logger.info(f"合并后的数据已保存到: {csv_path}")
-        
-        return merged_df
+            # 合并数据
+            combined_df = pd.concat([existing_data, funding_df])
+            
+            # 删除重复数据（基于timestamp）
+            combined_df = combined_df.drop_duplicates(subset=['timestamp'])
+            
+            # 按时间排序
+            combined_df = combined_df.sort_values('timestamp')
+            
+            # 重置索引
+            combined_df = combined_df.reset_index(drop=True)
+            
+            logger.info(f"合并后共有 {len(combined_df)} 条记录")
+            
+            # 保存到CSV
+            if save_to_csv:
+                combined_df.to_csv(csv_path, index=False)
+                logger.info(f"数据已保存到: {csv_path}")
+            
+            return combined_df
+        else:
+            # 如果没有现有数据，直接保存新数据
+            # 按时间排序
+            funding_df = funding_df.sort_values('timestamp')
+            # 重置索引
+            funding_df = funding_df.reset_index(drop=True)
+            
+            logger.info(f"共获取到 {len(funding_df)} 条新记录")
+            
+            # 保存到CSV
+            if save_to_csv:
+                funding_df.to_csv(csv_path, index=False)
+                logger.info(f"数据已保存到: {csv_path}")
+            
+            return funding_df
     else:
         logger.warning("未获取到任何资金费率数据")
-        return candle_data
+        return existing_data
 
 
 def okx_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=True, csv_dir=None):
@@ -249,7 +254,7 @@ def okx_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=T
         body = {
             'instId': symbol,
             'after': end,
-            # 'before': start,
+            'before': start,
             'bar': '1m',
             'limit': '60',
         }
