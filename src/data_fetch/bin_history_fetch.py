@@ -119,7 +119,7 @@ def bin_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, 
                         
                         funding_rates_data.append({
                             'timestamp': adjusted_timestamp,  # 使用调整后的时间戳
-                            'funding_rate': float(item['fundingRate'])
+                            'binFR': float(item['fundingRate'])
                         })
                 else:
                     logger.warning(f"该时间段未获取到数据")
@@ -292,12 +292,18 @@ def bin_fetch_history_mark_price_candles(symbol, segments, ticker, save_to_csv=T
                     logger.warning(f"该时间段未获取到数据: start={start}, end={end}")
             else:
                 # 如果是429错误(Too Many Requests)，增加等待时间
-                if res.status_code == 429:
+                status_code = res.status_code
+                error_code = res.json().get('code', 'Unknown')
+                logger.error(f"API请求失败: 状态码 {status_code}, 错误代码: {error_code}, 响应: {res.text}")
+                if status_code == 429:
                     logger.warning("收到限速响应，等待5秒后继续")
                     time.sleep(5)
                     i -= 1  # 重试当前请求
                     continue
-                logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
+                
+                if error_code == -1121:
+                    logger.error(f"当前交易所没有该币对！")
+                    break
         except Exception as e:
             logger.error(f"请求异常: {str(e)}")
             # 出现异常时等待一段时间后重试

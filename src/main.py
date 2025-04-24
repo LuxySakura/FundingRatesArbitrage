@@ -1,5 +1,13 @@
 from info_fetch import fetch_funding_rates
 from logger import setup_logger
+from sys import path as sys_path
+from os import path as os_path
+# 添加项目根目录到系统路径，确保可以导入src目录下的模块
+sys_path.append(os_path.dirname((os_path.dirname(__file__))))
+import src.perp_trade.bin_perp_trade as bin_perp_trade
+import src.perp_trade.okx_perp_trade as okx_perp_trade
+import src.perp_trade.hl_perp_trade as hl_perp_trade
+import src.perp_trade.bybit_perp_trade as bybit_perp_trade
 
 # 创建logger实例
 logger = setup_logger()
@@ -120,15 +128,35 @@ def main_loop():
 if __name__ == '__main__':
     """
     整个套利项目主程序
-    支持在每四小时以及奇数时刻(1,3,5,7)执行套利操作
     """
     logger.info("=== 套利程序启动 ===")
-    try:
-        main_loop()
-    except KeyboardInterrupt:
-        logger.info("程序被用户中断")
-    except Exception as e:
-        logger.error(f"程序异常退出: {str(e)}", exc_info=True)
-    finally:
-        logger.info("=== 套利程序结束 ===")
+    # try:
+    #     main_loop()
+    # except KeyboardInterrupt:
+    #     logger.info("程序被用户中断")
+    # except Exception as e:
+    #     logger.error(f"程序异常退出: {str(e)}", exc_info=True)
+    # finally:
+    #     logger.info("=== 套利程序结束 ===")
+    # open_price, open_size = hl_perp_trade.open_position_arb(
+    #     net=True, side=False, ticker="GAS"
+    # )
+    # logger.info(f"套利方开仓价格: {open_price}, 开仓张数: {open_size}")
+
+    # hedge_open_price = bin_perp_trade.open_position_hedge(
+    #     net=True, side=True, ticker="GAS", arb_size=7.1
+    # )
+    # logger.info(f"对冲方开仓价格: {hedge_open_price}, 开仓张数: ")
+
+    # arb_close_price = hl_perp_trade.close_position_arb(
+    #     net=True, side=True, ticker="GAS"
+    # )
+
+    bin_perp_trade.close_position_hedge(
+        net=True, side=False, ticker="GAS", 
+        arb_open_price=2.5383, arb_close_price=2.4899
+    )
+
+
+
     

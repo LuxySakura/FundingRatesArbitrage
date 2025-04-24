@@ -16,6 +16,7 @@ import websockets
 import requests
 import json
 import asyncio
+import time  # 添加time模块导入
 from sys import path as sys_path
 from os import path as os_path
 
@@ -221,7 +222,6 @@ def query_contract_specs(base_url, symbol):
     if res.status_code == 200:
         data = res.json()
         contract_data = data['data'][0]
-        logger.info(f"API请求成功: {data}")
 
         min_size = contract_data['lotSz']
         ct_val = float(contract_data['ctVal'])
@@ -229,7 +229,6 @@ def query_contract_specs(base_url, symbol):
 
         decimal_part = min_size.split('.')
         decimal_places = len(decimal_part[1]) if len(decimal_part) > 1 else 0
-        logger.info(f"API请求成功，最小下单数量: {min_size} {decimal_places}")
         return decimal_places, ct_val, ct_mult      
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
@@ -283,7 +282,6 @@ def query_position(base_url, api_key, secret_key, passphrase, symbol):
         position = data['data'][0]
         pos_size = float(position['pos'])
         entry_price = float(position['avgPx'])
-        logger.info(f"API请求成功，开仓数量： {pos_size}; 开仓均价： {entry_price}")
         return entry_price, pos_size
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
@@ -369,7 +367,6 @@ async def retrieve_price(base_url, symbol, side):
                 # 区分响应消息和推送数据
                 if 'event' in data:
                     # 这是响应消息
-                    logger.info(f"收到响应: {data['event']}")
                     if data['event'] == 'error':
                         logger.error(f"订阅失败: {data.get('arg', {}).get('channel')}")
                         break
@@ -399,6 +396,130 @@ async def retrieve_price(base_url, symbol, side):
     return target_price
 
 
+def check_order_filled(base_url, api_key, secret_key, passphrase, order_id, symbol):
+    """
+    检查订单是否已经成功填充
+    
+    Args:
+        base_url (str): OKX API的基础URL
+        api_key (str): OKX API密钥
+        secret_key (str): OKX API密钥对应的私钥
+        passphrase (str): OKX API密钥对应的Passphrase
+        order_id (str): 订单ID
+        
+    Returns:
+        bool: 订单是否已填充
+    """
+    if order_id == -1:
+        return False
+        
+    method = 'GET'
+    request_path = '/api/v5/trade/order'
+    timestamp = generate_timestamp()
+    
+    body = {
+        'instId': symbol,
+        'ordId': order_id
+    }
+    
+    sign = generate_sign(secret_key, timestamp, method, request_path, body)
+    
+    url = base_url + request_path
+    
+    headers = {
+        'Content-Type': "application/json",
+        'OK-ACCESS-KEY': api_key,
+        'OK-ACCESS-SIGN': sign,
+        'OK-ACCESS-PASSPHRASE': passphrase,
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'x-simulated-trading': "1"  # 代表使用测试网进行测试
+    }
+    
+    res = requests.get(
+        url,
+        headers=headers,
+        params=body
+    )
+    
+    if res.status_code == 200:
+        data = res.json()
+        if 'data' in data and len(data['data']) > 0:
+            order_status = data['data'][0]['state']
+            # 订单状态：canceled-已撤销，live-等待成交，partially_filled-部分成交，filled-完全成交
+            if order_status == 'filled':
+                return True
+            elif order_status == 'partially_filled':
+                # 部分成交也可以视为成功，具体取决于您的策略
+                fill_ratio = float(data['data'][0]['fillSz']) / float(data['data'][0]['sz'])
+                logger.info(f"订单部分成交，成交比例: {fill_ratio:.2%}")
+                # 如果成交比例超过某个阈值，也可以视为成功
+                if fill_ratio > 0.9:  # 例如90%以上视为成功
+                    return True
+    else:
+        logger.error(f"查询订单状态失败: 状态码 {res.status_code}, 响应: {res.text}")
+    
+    return False
+
+
+def cancel_order(base_url, api_key, secret_key, passphrase, order_id, symbol):
+    """
+    取消未成交的订单
+    
+    Args:
+        base_url (str): OKX API的基础URL
+        api_key (str): OKX API密钥
+        secret_key (str): OKX API密钥对应的私钥
+        passphrase (str): OKX API密钥对应的Passphrase
+        order_id (str): 订单ID
+        symbol (str): 交易对
+        
+    Returns:
+        bool: 是否成功取消订单
+    """
+    method = 'POST'
+    request_path = '/api/v5/trade/cancel-order'
+    timestamp = generate_timestamp()
+    
+    body = {
+        'instId': symbol,
+        'ordId': order_id
+    }
+    
+    # 将字典转换为JSON字符串
+    json_body = json.dumps(body)
+    
+    sign = generate_sign(secret_key, timestamp, method, request_path, json_body)
+    
+    url = base_url + request_path
+    
+    headers = {
+        'Content-Type': "application/json",
+        'OK-ACCESS-KEY': api_key,
+        'OK-ACCESS-SIGN': sign,
+        'OK-ACCESS-PASSPHRASE': passphrase,
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'x-simulated-trading': "1"  # 代表使用测试网进行测试
+    }
+    
+    res = requests.post(
+        url,
+        headers=headers,
+        data=json_body
+    )
+    
+    if res.status_code == 200:
+        data = res.json()
+        if data.get('code') == '0':
+            logger.info(f"成功取消订单: {order_id}")
+            return True
+        else:
+            logger.error(f"取消订单失败: {data.get('msg')}")
+    else:
+        logger.error(f"取消订单请求失败: 状态码 {res.status_code}, 响应: {res.text}")
+    
+    return False
+
+
 def place_trade(base_url, api_key, secret_key, passphrase, symbol, side, price, size):
     """
     下单
@@ -407,6 +528,14 @@ def place_trade(base_url, api_key, secret_key, passphrase, symbol, side, price, 
         base_url (str): OKX API的基础URL
         api_key (str): OKX API密钥
         secret_key (str): OKX API密钥对应的私钥
+        passphrase (str): OKX API密钥对应的Passphrase
+        symbol (str): 交易对
+        side (bool): 交易方向，True为买入，False为卖出
+        price (float): 下单价格
+        size (float): 下单数量
+        
+    Returns:
+        str: 订单ID，失败时返回-1
     """
     method = 'POST'
     request_path = '/api/v5/trade/order'
@@ -430,7 +559,6 @@ def place_trade(base_url, api_key, secret_key, passphrase, symbol, side, price, 
         'px': str(price),
         'sz': str(size),
     }
-    logger.info(f"下单参数: {body}")
     # 将字典转换为JSON字符串
     json_body = json.dumps(body)
 
@@ -455,7 +583,12 @@ def place_trade(base_url, api_key, secret_key, passphrase, symbol, side, price, 
 
     if res.status_code == 200:
         data = res.json()
-        logger.info(f"API下单成功，{data}")
+        if data.get('code') == '0' and 'data' in data and len(data['data']) > 0:
+            order_id = data['data'][0]['ordId']
+            logger.info(f"下单成功，订单ID: {order_id}")
+            return order_id
+        else:
+            logger.error(f"下单失败: {data.get('msg')}")
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
     return -1
@@ -492,11 +625,7 @@ def open_position_arb(net, side, ticker):
     # 调整杠杆
     adjust_leverage(rest_base_url, api_key, secret_key, passphrase, target_perp, POSITION_LEVERAGE)
     
-    # 计算开仓价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
-
+    # 获取合约规格信息
     # 计算开仓价值
     # 每个合约张数对应的币种数目不同，需要根据合约张数对应的币种数目计算开仓张数
     # 例如，目前使用的是BTC合约，每个合约张数对应的币种数目为0.01
@@ -505,24 +634,67 @@ def open_position_arb(net, side, ticker):
     # 可开仓张数 = 可开仓价值 ÷ (合约面值 × 价格 × 合约乘数)
     size_decimals, ct_val, ct_mult = query_contract_specs(rest_base_url, target_perp)
     position_fund = position_fund / (ct_val * ct_mult)
+    
+    # 实现订单填充检查和重试逻辑
+    max_retries = 10  # 最大重试次数
+    retry_interval = 3  # 重试间隔（秒）
+    order_id = None
+    filled = False
+    
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.info(f"第 {attempt} 次尝试下单...")
+        
+        # 计算开仓价格
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
 
-    # 计算开仓张数
-    target_size = set_size(
-        amount=position_fund, 
-        price=target_price, 
-        decimals=size_decimals, 
-        leverage=POSITION_LEVERAGE
-    )
-    logger.info(f"开仓张数: {target_size}")
+        # 计算开仓张数
+        target_size = set_size(
+            amount=position_fund, 
+            price=target_price, 
+            decimals=size_decimals, 
+            leverage=POSITION_LEVERAGE
+        )
+        logger.info(f"开仓张数: {target_size}")
 
-    # 下单
-    place_trade(
-        rest_base_url, 
-        api_key, secret_key, passphrase, 
-        target_perp, side, target_price, target_size
-    )
+        # 下单
+        order_id = place_trade(
+            rest_base_url, 
+            api_key, secret_key, passphrase, 
+            target_perp, side, target_price, target_size
+        )
 
-    return target_price, target_size
+        # 留出fill订单的时间
+        time.sleep(10)
+        
+        # 检查订单是否成功填充
+        filled = check_order_filled(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+        
+        if filled:
+            logger.info(f"订单已成功填充，订单ID: {order_id}")
+            break
+        
+        # 如果订单未填充，取消订单
+        if order_id != -1:
+            cancel_order(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+            logger.info(f"订单未填充，已取消订单ID: {order_id}")
+        
+        # 等待一段时间后重试
+        if attempt < max_retries - 1:  # 如果不是最后一次尝试
+            logger.info(f"等待 {retry_interval} 秒后重试...")
+            time.sleep(retry_interval)
+    
+    if not filled:
+        logger.error(f"达到最大重试次数 {max_retries}，订单仍未成功填充")
+        return -1, -1
+
+    # 获取实际成交价格和数量
+    entry_price, pos_size = query_position(rest_base_url, api_key, secret_key, passphrase, target_perp)
+    logger.info(f"成功开仓，价格: {entry_price}, 数量: {pos_size}")
+
+    return entry_price, pos_size
 
 
 def open_position_hedge(net, side, ticker, arb_size):
@@ -554,18 +726,57 @@ def open_position_hedge(net, side, ticker, arb_size):
     okx_size = arb_size / (ct_val*ct_mult)
     logger.info(f"OKX张数: {okx_size}")
 
-    # 计算开仓价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
+    # 实现订单填充检查和重试逻辑
+    max_retries = 10  # 最大重试次数
+    retry_interval = 3  # 重试间隔（秒）
+    order_id = None
+    filled = False
+    
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.info(f"第 {attempt} 次尝试下单...")
+        
+        # 计算开仓价格
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
 
-    # 下单
-    place_trade(
-        rest_base_url, 
-        api_key, secret_key, passphrase, 
-        target_perp, side, target_price, okx_size
-    )
-    return target_price
+        # 下单
+        order_id = place_trade(
+            rest_base_url, 
+            api_key, secret_key, passphrase, 
+            target_perp, side, target_price, okx_size
+        )
+
+        # 留出fill订单的时间
+        time.sleep(10)
+        
+        # 检查订单是否成功填充
+        filled = check_order_filled(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+        
+        if filled:
+            logger.info(f"订单已成功填充，订单ID: {order_id}")
+            break
+        
+        # 如果订单未填充，取消订单
+        if order_id != -1:
+            cancel_order(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+            logger.info(f"订单未填充，已取消订单ID: {order_id}")
+        
+        # 等待一段时间后重试
+        if attempt < max_retries - 1:  # 如果不是最后一次尝试
+            logger.info(f"等待 {retry_interval} 秒后重试...")
+            time.sleep(retry_interval)
+    
+    if not filled:
+        logger.error(f"达到最大重试次数 {max_retries}，订单仍未成功填充")
+        return -1, -1
+
+    # 获取实际成交价格和数量
+    entry_price, pos_size = query_position(rest_base_url, api_key, secret_key, passphrase, target_perp)
+    logger.info(f"成功开仓，价格: {entry_price}, 数量: {pos_size}")
+
+    return entry_price, pos_size
 
 
 def close_position_arb(net, side, ticker):
@@ -591,19 +802,52 @@ def close_position_arb(net, side, ticker):
         api_key, secret_key, passphrase, 
         target_perp
     )
-    # logger.info(f"仓位信息: {position}")
 
-    # 计算开仓价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
+    # 实现订单填充检查和重试逻辑
+    max_retries = 10  # 最大重试次数
+    retry_interval = 3  # 重试间隔（秒）
+    order_id = None
+    filled = False
+    
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.info(f"第 {attempt} 次尝试下单...")
+        
+        # 计算开仓价格
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
 
-    # 下单
-    place_trade(
-        rest_base_url, 
-        api_key, secret_key, passphrase, 
-        target_perp, side, target_price, pos_size
-    )
+        # 下单
+        order_id = place_trade(
+            rest_base_url, 
+            api_key, secret_key, passphrase, 
+            target_perp, side, target_price, pos_size
+        )
+
+        # 留出fill订单的时间
+        time.sleep(10)
+        
+        # 检查订单是否成功填充
+        filled = check_order_filled(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+        
+        if filled:
+            logger.info(f"订单已成功成交，订单ID: {order_id}")
+            break
+        
+        # 如果订单未填充，取消订单
+        if order_id != -1:
+            cancel_order(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+            logger.info(f"订单未成交，已取消订单ID: {order_id}")
+        
+        # 等待一段时间后重试
+        if attempt < max_retries - 1:  # 如果不是最后一次尝试
+            logger.info(f"等待 {retry_interval} 秒后重试...")
+            time.sleep(retry_interval)
+    
+    if not filled:
+        logger.error(f"达到最大重试次数 {max_retries}，订单仍未成功填充")
+        return -1
 
     return 0
 
@@ -630,44 +874,77 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
         api_key, secret_key, passphrase, 
         target_perp
     )
-    # logger.info(f"仓位信息: {position}")
 
-    # 计算开仓价格
-    current_market_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
-    # 计算价格风险完全对冲的平仓价格
-    hedge_price = arb_close_price + hedge_open_price - arb_open_price
+    # 实现订单填充检查和重试逻辑
+    max_retries = 10  # 最大重试次数
+    retry_interval = 3  # 重试间隔（秒）
+    order_id = None
+    filled = False
+    
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.info(f"第 {attempt} 次尝试下单...")
+        
+        # 计算开仓价格
+        current_market_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
+        # 计算价格风险完全对冲的平仓价格
+        hedge_price = arb_close_price + hedge_open_price - arb_open_price
 
-    # 计算最终的平仓价格
-    if side:
-        # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
-        target_price = min(hedge_price, current_market_price)
-    else:
-        # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
-        target_price = max(hedge_price, current_market_price)
+        # 计算最终的平仓价格
+        if side:
+            # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
+            target_price = min(hedge_price, current_market_price)
+        else:
+            # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
+            target_price = max(hedge_price, current_market_price)
 
-    logger.info(
-        f"市场价格: {current_market_price}, "
-        f"风险完全对冲价格: {hedge_price}, "
-        f"最终平仓价格: {target_price}, "
-        f"平仓数量: {hedge_size}, "
-        f"平仓方向: {side}"
-     )
+        logger.info(
+            f"市场价格: {current_market_price}, "
+            f"风险完全对冲价格: {hedge_price}, "
+            f"最终平仓价格: {target_price}, "
+            f"平仓数量: {hedge_size}, "
+            f"平仓方向: {side}"
+        )
 
-    # 下单
-    place_trade(
-        base_url=rest_base_url,
-        api_key=api_key, secret_key=secret_key, passphrase=passphrase,
-        price=target_price, side=side,
-        symbol=target_perp, size=hedge_size
-    )
+        # 下单
+        order_id = place_trade(
+            base_url=rest_base_url,
+            api_key=api_key, secret_key=secret_key, passphrase=passphrase,
+            price=target_price, side=side,
+            symbol=target_perp, size=hedge_size
+        )
+
+        # 留出fill订单的时间
+        time.sleep(10)
+        
+        # 检查订单是否成功填充
+        filled = check_order_filled(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+        
+        if filled:
+            logger.info(f"订单已成功填充，订单ID: {order_id}")
+            break
+        
+        # 如果订单未填充，取消订单
+        if order_id != -1:
+            cancel_order(rest_base_url, api_key, secret_key, passphrase, order_id, target_perp)
+            logger.info(f"订单未填充，已取消订单ID: {order_id}")
+        
+        # 等待一段时间后重试
+        if attempt < max_retries - 1:  # 如果不是最后一次尝试
+            logger.info(f"等待 {retry_interval} 秒后重试...")
+            time.sleep(retry_interval)
+    
+    if not filled:
+        logger.error(f"达到最大重试次数 {max_retries}，订单仍未成功填充")
+        return -1
 
     return 0
 
 
 if __name__ == "__main__":
     logger.info("OKX 合约下单测试")
-    # open_position_arb(False, True, "BTC")
+    open_position_arb(False, True, "BTC")
     # open_position_hedge(False, True, "BTC", 0.005)
-    close_position_arb(False, False, "BTC")
+    # close_position_arb(False, False, "BTC")

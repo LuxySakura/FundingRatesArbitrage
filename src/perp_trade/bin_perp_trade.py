@@ -365,9 +365,10 @@ async def retrieve_price(base_url, symbol, side):
                     
                     # 计算最小价格变动
                     min_price_movement = 10 ** (-decimal_places)
-                    
+                    logger.info(f"最小价格变动: {min_price_movement}")
                     # 计算目标价格
                     target_price = set_price(price, side, min_price_movement)
+                    target_price = round(target_price, decimal_places)
                     logger.info(f"当前价格: {price}; 目标价格: {target_price}")
                 else:
                     logger.error(f"API请求失败: 状态码 {data['status']}, 响应: {data}")
@@ -520,7 +521,7 @@ def open_position_hedge(net, side, ticker, arb_size):
     config = BinanceApiConfig(net)  # 构建对应网络的API配置
     rest_base_url = config.get_rest_url()  # 获取REST API的基础URL
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
-    target_perp = ticker+"USDC"  # 根据ticker构建出目标perp的币对
+    target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
     api_key, secret_key = fetch_api_key(net)
 
     # 调整目标标的杠杆
@@ -668,7 +669,9 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
 
 if __name__ == "__main__":
     # open_position_arb(False, True, "BTC")
-
+    target_price = asyncio.run(
+        retrieve_price('wss://ws-fapi.binance.com/ws-fapi/v1', 'GASUSDT', True)
+    )
     # close_position_arb(False, False, "BTC")
 
-    close_position_hedge(False, False, "BTC", 20000, 19950)
+    # close_position_hedge(False, False, "BTC", 20000, 19950)

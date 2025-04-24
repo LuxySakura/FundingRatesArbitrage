@@ -695,5 +695,7 @@ if __name__ == "__main__":
     # 示例用法
     print("<==== Testing Bybit Perp Trade ====>")
     # open_position_arb(False, True, "BTC")
-    close_position_arb(False, False, "BTC")
+    target_price = asyncio.run(
+        retrieve_price('wss://stream.bybit.com/v5', 'GASUSDT', True)
+    )
     print("<==== Testing Bybit Perp Trade End ====>")

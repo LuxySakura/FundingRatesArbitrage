@@ -127,7 +127,7 @@ def okx_fetch_history_funding_rates(symbol, segments, ticker, save_to_csv=True, 
                         
                         funding_rates_data.append({
                             'timestamp': adjusted_timestamp,  # 使用调整后的时间戳
-                            'funding_rate': float(item['fundingRate'])
+                            'okxFR': float(item['fundingRate'])
                         })
                 else:
                     logger.warning(f"该时间段未获取到数据")

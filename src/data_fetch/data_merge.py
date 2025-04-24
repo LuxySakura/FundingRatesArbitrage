@@ -23,7 +23,7 @@ def merge_exchange_data(ticker, flag):
     
     Args:
         ticker (str): 交易对标识，如'BTC'
-        flag (bool): 是否为历史数据获取（True）或资金费率数据（False）
+        flag (bool): 是否为资金费率数据（True）或历史K线数据（False）
     
     Returns:
         bool: 合并是否成功
@@ -31,21 +31,23 @@ def merge_exchange_data(ticker, flag):
     try:
         # 定义四个交易所的文件路径
         if flag:
-            data_dir = os.path.join(os.path.dirname(os.path.dirname(os_path.dirname(__file__))), "data/funding_rates")
+            data_dir = os.path.join(os.path.dirname(os.path.dirname(os_path.dirname(__file__))), "data/fundingRates")
             okx_file = os.path.join(data_dir, f"okx_{ticker}_fr.csv")
             bin_file = os.path.join(data_dir, f"bin_{ticker}_fr.csv")
             hl_file = os.path.join(data_dir, f"hl_{ticker}_fr.csv")
             bybit_file = os.path.join(data_dir, f"bybit_{ticker}_fr.csv")
+            output_path = os.path.join(data_dir, f"{ticker}_fr.csv")  # 保存路径
         else:
-            data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data/candles")
+            data_dir = os.path.join(os.path.dirname(os.path.dirname(os_path.dirname(__file__))), "data/candles")
             okx_file = os.path.join(data_dir, f"okx_{ticker}_1m.csv")
             bin_file = os.path.join(data_dir, f"bin_{ticker}_1m.csv")
             hl_file = os.path.join(data_dir, f"hl_{ticker}_1m.csv")
             bybit_file = os.path.join(data_dir, f"bybit_{ticker}_1m.csv")
+            output_path = os.path.join(data_dir, f"{ticker}_candles.csv")
         
         # 检查文件是否存在
-        files = [okx_file, bin_file, hl_file, bybit_file]
-        exchanges = ['okx', 'bin', 'hl', 'bybit']
+        files = [hl_file, bin_file, okx_file, bybit_file]
+        exchanges = ['hl', 'bin', 'okx', 'bybit']
         
         dfs = []
         for i, file_path in enumerate(files):
@@ -91,9 +93,18 @@ def merge_exchange_data(ticker, flag):
             logger.warning(f"数据行数不足，无法去除首尾数据，当前行数: {len(merged_df)}")
         
         # 保存合并后的数据
-        output_path = os.path.join(data_dir, f"{ticker}_merged_data.csv")
         merged_df.to_csv(output_path, index=False)
         logger.info(f"合并数据已保存至: {output_path}")
+        
+        # 删除原始数据文件
+        for file_path in files:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info(f"已删除原始数据文件: {file_path}")
+                except Exception as e:
+                    logger.warning(f"删除文件 {file_path} 时出错: {e}")
+        
         return True
     
     except Exception as e:
@@ -101,54 +112,66 @@ def merge_exchange_data(ticker, flag):
         return False
 
 
-if __name__ == '__main__':
-    days = 7  # 要收集的天数
-    ticker = 'BTC'
-    flag = True # 标识操作的数据为资金费率数据还是K线数据，True为资金费率数据，False为K线数据
+def fetch_ticker_data(ticker, k_segments, fr_segments):
+    """
+    从四个交易所获取历史数据
 
-    okx_symbol = 'BTC-USDT-SWAP'  # 要采集的symbol
-    bin_symbol = 'BTCUSDT'  # 要采集的symbol
-    bybit_symbol = 'BTCUSDT'  # 要采集的symbol
-    
-    k_history_segments = genearate_history_moments(interval=1, batch=60, days=days)  # K线数据的时间段
-    fr_segments = genearate_history_moments(interval=60, batch=24, days=days)  # 资金费率数据的时间段
+    Args:
+        ticker (str): 交易对标识，如'BTC'
+        k_segments (list): K线数据的时间段
+        fr_segments (list): 资金费率数据的时间段
 
-    # print("<=== OKX History Candles ====>")
-    # okx_fetch_history_mark_price_candles(symbol=okx_symbol, segments=k_history_segments, ticker=ticker)
-    # print("#=========================#\n")
+    Returns:
+        bool: 数据获取是否成功
+    """
+    # 定义四个交易所的symbol
+    okx_symbol = f'{ticker}-USDT-SWAP'  # OKX symbol
+    bin_symbol = f'{ticker}USDT'  # Binance symbol
+    bybit_symbol = f'{ticker}USDT'  # 要采集的symbol
 
-    # print("<==== Hyper Liquid History Candles ====>")
-    # hl_fetch_history_mark_price_candles(symbol=ticker, segments=k_history_segments, ticker=ticker)
-    # print("#=========================#\n")
-
-    # print("<==== Binance History Candles ====>")
-    # bin_fetch_history_mark_price_candles(symbol=bin_symbol, segments=k_history_segments, ticker=ticker)
-    # print("#=========================#\n")
-
-    # print("<==== Bybit History Candles ====>")
-    # bybit_fetch_history_mark_price_candles(symbol=bybit_symbol, segments=k_history_segments, ticker=ticker)
-    # print("#=========================#\n")
-
-    print("<==== Binance History FR ====>")
+    # 获取历史K线数据
+    okx_fetch_history_mark_price_candles(symbol=okx_symbol, segments=k_history_segments, ticker=ticker)
+    hl_fetch_history_mark_price_candles(symbol=ticker, segments=k_history_segments, ticker=ticker)
+    bin_fetch_history_mark_price_candles(symbol=bin_symbol, segments=k_history_segments, ticker=ticker)
+    bybit_fetch_history_mark_price_candles(symbol=bybit_symbol, segments=k_history_segments, ticker=ticker)
+   
+    # # 获取历史资金费率数据
     bin_fetch_history_funding_rates(symbol=bin_symbol, segments=fr_segments, ticker=ticker)
-    print("#=========================#\n")
-
-    print("<==== OKX History FR ====>")
     okx_fetch_history_funding_rates(symbol=okx_symbol, segments=fr_segments, ticker=ticker)
-    print("#=========================#\n")
-
-    print("<==== Bybit History FR ====>")
     bybit_fetch_history_funding_rates(symbol=bybit_symbol, segments=fr_segments, ticker=ticker)
-    print("#=========================#\n")
-
-    print("<==== Hyper Liquid History FR ====>")
     hl_fetch_history_funding_rates(symbol=ticker, segments=fr_segments, ticker=ticker)
-    print("#=========================#\n")
+
+    # 合并数据
+    merge_exchange_data(ticker, True)
+    merge_exchange_data(ticker, False)
+
+
+if __name__ == '__main__':
+    days = 1  # 要收集的天数
     
-    # 在所有数据获取完成后，执行合并操作
-    print("\n<==== 开始合并数据 ====>")
-    if merge_exchange_data(ticker, True):
-        print(f"所有交易所数据已合并到 ../data/fundingRates/{ticker}_fr.csv")
-    else:
-        print("数据合并失败")
-    print("#=========================#\n")
+    # 读取CSV文件中的ticker列
+    try:
+        # 定义CSV文件路径
+        csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data/funding_data.csv")
+        
+        if os.path.exists(csv_path):
+            # 读取CSV文件
+            tickers_df = pd.read_csv(csv_path)
+            
+            # 检查是否存在ticker列
+            if 'ticker' in tickers_df.columns:
+                tickers = tickers_df['ticker'].unique().tolist()
+                logger.info(f"从CSV文件中读取到{len(tickers)}个ticker: {tickers}")
+                
+                # 为每个ticker生成时间段
+                k_history_segments = genearate_history_moments(interval=1, batch=60, days=days)  # K线数据的时间段
+                fr_segments = genearate_history_moments(interval=60, batch=24, days=days)  # 资金费率数据的时间段
+                
+                # 为每个ticker调用函数
+                for ticker in tickers:
+                    logger.info(f"开始处理ticker: {ticker}")
+                    # fetch_ticker_data(ticker, k_history_segments, fr_segments)
+        else:
+            logger.warning(f"CSV文件不存在: {csv_path}")
+    except Exception as e:
+        logger.error(f"读取CSV文件时发生错误: {e}")

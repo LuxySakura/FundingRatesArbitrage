@@ -155,7 +155,7 @@ def open_position_arb(net, side, ticker):
     base_url = HyperLiquidApiConfig(net).get_rest_url()
 
     # 获取账户信息
-    _info = Info(constants.TESTNET_API_URL, skip_ws=True)
+    _info = Info(constants.MAINNET_API_URL, skip_ws=True)
     _user_state = _info.user_state(_address)
 
     # 计算保证金

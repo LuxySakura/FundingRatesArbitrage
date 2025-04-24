@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-POSITION_RISK = 0.01  # 风险度，每次开仓的保证金占比
-POSITION_LEVERAGE = 5  # 开仓杠杆
+POSITION_RISK = 0.05  # 风险度，每次开仓的保证金占比
+POSITION_LEVERAGE = 2  # 开仓杠杆
 
 # 创建交易平台API配置的抽象基类
 class ExchangeApiConfig(ABC):
@@ -50,7 +50,7 @@ def set_price(price, side, min_base_price):
     """
     # 将布尔值side转换为1或-1
     side_value = 1 if side else -1
-    return price - 100*min_base_price*side_value
+    return price - 5*min_base_price*side_value
 
 
 def set_size(amount, leverage, price, decimals):
@@ -68,7 +68,6 @@ def set_size(amount, leverage, price, decimals):
     """
     # 获取目标开仓张数
     _target_size = (amount*leverage) / price  # 张数 = （保证金*杠杆）/开仓价格
-    print(f"raw target_size: {_target_size}")
     # 根据szDecimals规范化大小
     _target_size = round(_target_size, int(decimals))
     # 转换为字符串，确保精度正确
