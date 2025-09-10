@@ -121,7 +121,9 @@ def retrieve_price(ticker, base_url, side, decimals):
         _bid_price = data['levels'][0][0]["px"]
         # 计算最小价格变动单位
         _min_price_movement = cal_min_price_move(_bid_price, decimals)
+        logger.info(f"最小价格变动单位: {_min_price_movement}")
         _bid_price = float(_bid_price)
+        logger.info(f"当前最优买价: {_bid_price}")
 
         # _mark_price = data[1][index]['markPx']
         # _mid_price = float(data[1][index]['midPx'])
@@ -138,24 +140,27 @@ def retrieve_price(ticker, base_url, side, decimals):
         return -1
 
 
-def open_position_arb(net, side, ticker):
+def open_position_arb(net, side, ticker, max_retries=5, retry_interval=3):
     """Hyper Liquid套利方开仓
     
     Args:
         net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
         side (bool): 开仓方向，True为买入开仓，False为卖出开仓
         ticker (str): 目标标的，如"BTC"
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为3秒
         
     Returns:
         tuple: 包含开仓价格和开仓数量的元组
             - target_price (float): 套利方开仓价格
             - target_size (float): 套利方开仓张数
+            - success (bool): 订单是否成功填充
     """
     _account, _address = fetch_account_address()
     base_url = HyperLiquidApiConfig(net).get_rest_url()
 
     # 获取账户信息
-    _info = Info(constants.MAINNET_API_URL, skip_ws=True)
+    _info = Info(constants.MAINNET_API_URL if net else constants.TESTNET_API_URL, skip_ws=True)
     _user_state = _info.user_state(_address)
 
     # 计算保证金
@@ -164,7 +169,7 @@ def open_position_arb(net, side, ticker):
     logger.info(f"总保证金USD: {_vault_fund}")
 
     # 根据Ticker获取Hyper Liquid Token Index
-    df = pd.read_csv('./data/hl_ticker_index.csv')
+    df = pd.read_csv('./data/hl_ticker_index.csv') if net else pd.read_csv('./data/hl_ticker_index_testnet.csv')
     # 根据ticker获取index/decimals/maxLeverage
     _target_record = df[df['name'] == ticker]
     
@@ -174,51 +179,110 @@ def open_position_arb(net, side, ticker):
     # 获取目标杠杆，取5和最大可支持杠杆中的最小值
     _target_leverage = min(_max_leverage, POSITION_LEVERAGE)
 
-    # 计算开仓价格/张数
-    _target_price = retrieve_price(
-        ticker=ticker, 
-        base_url=base_url,
-        side=side,
-        decimals=_decimals
-    )
-
-    _target_size = set_size(
-        amount=float(_vault_fund),
-        leverage=_target_leverage,
-        price=_target_price,
-        decimals=_decimals
-    )
-
-    logger.info(
-        f"目标价格: {_target_price}, "
-        f"目标数量: {_target_size}, "
-        f"目标杠杆: {_target_leverage}"
-    )
-
     # 创建Exchange类
     exchange = Exchange(_account, base_url, account_address=_address)
     # 设置对应的杠杆（逐仓保证金模式）
     exchange.update_leverage(_target_leverage, ticker, False)
-    # 下单
-    order_res = exchange.order(
-        ticker,
-        side,
-        _target_size,
-        _target_price,
-        {"limit": {"tif": "Gtc"}}
-    )
-    logger.info(f"下单结果: {order_res}")
+    
+    # 订单成功标志
+    order_success = False
+    # 订单ID
+    order_id = None
+    # 重试计数
+    retry_count = 0
+    
+    while not order_success and retry_count < max_retries:
+        try:
+            # 计算开仓价格/张数 (每次重试都重新获取价格)
+            _target_price = retrieve_price(
+                ticker=ticker, 
+                base_url=base_url,
+                side=side,
+                decimals=_decimals
+            )
 
-    # Query the order status by oid
-    if order_res["status"] == "ok":
-        status = order_res["response"]["data"]["statuses"][0]
-        if "resting" in status:
-            order_status = _info.query_order_by_oid(_address, status["resting"]["oid"])
-            logger.info(f"订单状态: {order_status}")
-    return _target_price, _target_size
+            _target_size = set_size(
+                amount=float(_vault_fund),
+                leverage=_target_leverage,
+                price=_target_price,
+                decimals=_decimals
+            )
+
+            logger.info(
+                f"尝试 #{retry_count+1}: "
+                f"目标价格: {_target_price}, "
+                f"目标数量: {_target_size}, "
+                f"目标杠杆: {_target_leverage}"
+            )
+
+            # 下单
+            order_res = exchange.order(
+                ticker,
+                side,
+                _target_size,
+                _target_price,
+                {"limit": {"tif": "Gtc"}}
+            )
+            logger.info(f"下单结果: {order_res}")
+
+            # 检查订单状态
+            if order_res["status"] == "ok":
+                status = order_res["response"]["data"]["statuses"][0]
+                if "resting" in status:
+                    order_id = status["resting"]["oid"]
+                    
+                    # 等待一段时间，让订单有机会被填充
+                    time.sleep(retry_interval)
+                    
+                    # 查询订单状态
+                    order_status = _info.query_order_by_oid(_address, order_id)
+                    logger.info(f"订单状态: {order_status}")
+                    
+                    # 检查订单是否已经被填充
+                    if "filled" in order_status["statuses"][0]:
+                        logger.info(f"订单已成功填充: {order_id}")
+                        order_success = True
+                    elif "cancelled" in order_status["statuses"][0]:
+                        logger.warning(f"订单已被取消: {order_id}")
+                        # 取消的订单需要重试
+                        retry_count += 1
+                    else:
+                        # 订单仍在等待中，尝试取消并重试
+                        logger.warning(f"订单未被填充，尝试取消: {order_id}")
+                        cancel_res = exchange.cancel_order(ticker, order_id)
+                        logger.info(f"取消订单结果: {cancel_res}")
+                        retry_count += 1
+                elif "filled" in status:
+                    logger.info(f"订单立即成功填充")
+                    order_success = True
+                else:
+                    logger.warning(f"订单状态未知: {status}")
+                    retry_count += 1
+            else:
+                logger.error(f"下单失败: {order_res}")
+                retry_count += 1
+                
+            # 如果需要重试，等待一段时间
+            if not order_success and retry_count < max_retries:
+                logger.info(f"等待 {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+                
+        except Exception as e:
+            logger.error(f"下单过程中发生错误: {str(e)}")
+            retry_count += 1
+            if retry_count < max_retries:
+                logger.info(f"等待 {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+    
+    if order_success:
+        logger.info(f"订单成功执行，价格: {_target_price}, 数量: {_target_size}")
+        return _target_price, _target_size, True
+    else:
+        logger.error(f"达到最大重试次数 {max_retries}，订单未能成功执行")
+        return _target_price, _target_size, False
 
 
-def open_position_hedge(net, side, ticker, arb_size):
+def open_position_hedge(net, side, ticker, arb_size, max_retries=5, retry_interval=3):
     """Hyper Liquid对冲方开仓
     
     Args:
@@ -226,12 +290,16 @@ def open_position_hedge(net, side, ticker, arb_size):
         side (bool): 开仓方向，True为买入开仓，False为卖出开仓
         ticker (str): 目标标的，如"BTC"
         arb_size (float): 套利方开仓张数
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为3秒
         
     Returns:
-        float: 对冲方开仓价格
+        tuple: 包含对冲方开仓价格和成功状态的元组
+            - target_price (float): 对冲方开仓价格
+            - success (bool): 订单是否成功填充
     """
     _account, _address = fetch_account_address()
-    _info = Info(constants.TESTNET_API_URL, skip_ws=True)
+    _info = Info(constants.MAINNET_API_URL if net else constants.TESTNET_API_URL, skip_ws=True)
     base_url = HyperLiquidApiConfig(net).get_rest_url()
 
     # 根据Ticker获取Hyper Liquid Token Index
@@ -245,56 +313,121 @@ def open_position_hedge(net, side, ticker, arb_size):
     # 获取目标杠杆，取5和最大可支持杠杆中的最小值
     _target_leverage = min(_max_leverage, POSITION_LEVERAGE)
 
-    # 计算开仓价格
-    _target_price = retrieve_price(
-        ticker=ticker, 
-        base_url=base_url, 
-        side=side,
-        decimals=_decimals
-    )
-
-    logger.info(
-        f"对冲方开仓价格: {_target_price}, "
-        f"对冲方开仓数量: {arb_size}, "
-        f"对冲方开仓杠杆: {_target_leverage}"
-    )
-
     # 创建Exchange类
     exchange = Exchange(_account, base_url, account_address=_address)
     # 设置对应的杠杆（逐仓保证金模式）
     exchange.update_leverage(_target_leverage, ticker, False)
-    # 下单
-    order_res = exchange.order(
-        ticker,
-        side,
-        arb_size,
-        _target_price,
-        {"limit": {"tif": "Gtc"}}
-    )
-    logger.info(f"下单结果: {order_res}")
+    
+    # 订单成功标志
+    order_success = False
+    # 订单ID
+    order_id = None
+    # 重试计数
+    retry_count = 0
+    # 目标价格
+    _target_price = None
+    
+    while not order_success and retry_count < max_retries:
+        try:
+            # 计算开仓价格 (每次重试都重新获取价格)
+            _target_price = retrieve_price(
+                ticker=ticker, 
+                base_url=base_url, 
+                side=side,
+                decimals=_decimals
+            )
 
-    # Query the order status by oid
-    if order_res["status"] == "ok":
-        status = order_res["response"]["data"]["statuses"][0]
-        if "resting" in status:
-            order_status = _info.query_order_by_oid(_address, status["resting"]["oid"])
-            logger.info(f"订单状态: {order_status}")
-    return _target_price
+            logger.info(
+                f"尝试 #{retry_count+1}: "
+                f"对冲方开仓价格: {_target_price}, "
+                f"对冲方开仓数量: {arb_size}, "
+                f"对冲方开仓杠杆: {_target_leverage}"
+            )
+
+            # 下单
+            order_res = exchange.order(
+                ticker,
+                side,
+                arb_size,
+                _target_price,
+                {"limit": {"tif": "Gtc"}}
+            )
+            logger.info(f"下单结果: {order_res}")
+
+            # 检查订单状态
+            if order_res["status"] == "ok":
+                status = order_res["response"]["data"]["statuses"][0]
+                if "resting" in status:
+                    order_id = status["resting"]["oid"]
+                    
+                    # 等待一段时间，让订单有机会被填充
+                    time.sleep(retry_interval)
+                    
+                    # 查询订单状态
+                    order_status = _info.query_order_by_oid(_address, order_id)
+                    logger.info(f"订单状态: {order_status}")
+                    
+                    # 检查订单是否已经被填充
+                    if "filled" in order_status["statuses"][0]:
+                        logger.info(f"订单已成功填充: {order_id}")
+                        order_success = True
+                    elif "cancelled" in order_status["statuses"][0]:
+                        logger.warning(f"订单已被取消: {order_id}")
+                        # 取消的订单需要重试
+                        retry_count += 1
+                    else:
+                        # 订单仍在等待中，尝试取消并重试
+                        logger.warning(f"订单未被填充，尝试取消: {order_id}")
+                        cancel_res = exchange.cancel_order(ticker, order_id)
+                        logger.info(f"取消订单结果: {cancel_res}")
+                        retry_count += 1
+                elif "filled" in status:
+                    logger.info(f"订单立即成功填充")
+                    order_success = True
+                else:
+                    logger.warning(f"订单状态未知: {status}")
+                    retry_count += 1
+            else:
+                logger.error(f"下单失败: {order_res}")
+                retry_count += 1
+                
+            # 如果需要重试，等待一段时间
+            if not order_success and retry_count < max_retries:
+                logger.info(f"等待 {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+                
+        except Exception as e:
+            logger.error(f"下单过程中发生错误: {str(e)}")
+            retry_count += 1
+            if retry_count < max_retries:
+                logger.info(f"等待 {retry_interval} 秒后重试...")
+                time.sleep(retry_interval)
+    
+    if order_success:
+        logger.info(f"对冲方订单成功执行，价格: {_target_price}")
+        return _target_price, True
+    else:
+        logger.error(f"达到最大重试次数 {max_retries}，对冲方订单未能成功执行")
+        return _target_price, False
 
 
-def close_position_arb(net, side, ticker):
+def close_position_arb(net, side, ticker, max_retries=5, retry_interval=3):
     """Hyper Liquid套利方平仓
     
     Args:
         net (bool): Hyper Liquid的API URL类型，True为主网，False为测试网
         side (bool): 平仓方向，True为买入平仓，False为卖出平仓
         ticker (str): 目标标的，如"BTC"
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为3秒
         
     Returns:
-        float: 套利方平仓价格，失败时返回-1
+        tuple: 包含平仓价格和成功状态的元组
+            - target_price (float): 套利方平仓价格
+            - success (bool): 订单是否成功填充
     """
     _account, _address = fetch_account_address()
-    _info = Info(constants.TESTNET_API_URL, skip_ws=True)
+    _info = Info(constants.MAINNET_API_URL if net else constants.TESTNET_API_URL, skip_ws=True)
     base_url = HyperLiquidApiConfig(net).get_rest_url()
 
     url = base_url + '/info'
@@ -330,46 +463,107 @@ def close_position_arb(net, side, ticker):
         _target_record = df[df['name'] == ticker]
         _decimals = _target_record.iloc[0]['szDecimals']  # 获取该标的的小数位信息
 
-        # 计算平仓价格/张数
-        _target_price = retrieve_price(
-            ticker=ticker, 
-            base_url=base_url,
-            side=side,
-            decimals=_decimals
-        )
-        logger.info(
-            f"平仓价格: {_target_price}, "
-            f"平仓数量: {arb_size}, "
-            f"利润: {pnl}, "
-            f"平仓方向: {side}"
-        )
-
         # 创建Exchange类
         exchange = Exchange(_account, base_url, account_address=_address)
-        # 平仓
-        order_res = exchange.order(
-            ticker,
-            side,
-            arb_size,
-            _target_price,
-            {"limit": {"tif": "Gtc"}}
-        )
-        logger.info(f"下单结果: {order_res}")
+        
+        # 订单成功标志
+        order_success = False
+        # 订单ID
+        order_id = None
+        # 重试计数
+        retry_count = 0
+        # 目标价格
+        _target_price = None
+        
+        while not order_success and retry_count < max_retries:
+            try:
+                # 计算平仓价格 (每次重试都重新获取价格)
+                _target_price = retrieve_price(
+                    ticker=ticker, 
+                    base_url=base_url,
+                    side=side,
+                    decimals=_decimals
+                )
 
-        # Query the order status by oid
-        if order_res["status"] == "ok":
-            status = order_res["response"]["data"]["statuses"][0]
-            if "resting" in status:
-                order_status = _info.query_order_by_oid(_address, status["resting"]["oid"])
-                logger.info(f"订单状态: {order_status}")
+                logger.info(
+                    f"尝试 #{retry_count+1}: "
+                    f"平仓价格: {_target_price}, "
+                    f"平仓数量: {arb_size}, "
+                    f"利润: {pnl}, "
+                    f"平仓方向: {side}"
+                )
 
-        return _target_price
+                # 下单
+                order_res = exchange.order(
+                    ticker,
+                    side,
+                    arb_size,
+                    _target_price,
+                    {"limit": {"tif": "Gtc"}}
+                )
+                logger.info(f"下单结果: {order_res}")
+
+                # 检查订单状态
+                if order_res["status"] == "ok":
+                    status = order_res["response"]["data"]["statuses"][0]
+                    if "resting" in status:
+                        order_id = status["resting"]["oid"]
+                        
+                        # 等待一段时间，让订单有机会被填充
+                        time.sleep(retry_interval)
+                        
+                        # 查询订单状态
+                        order_status = _info.query_order_by_oid(_address, order_id)
+                        logger.info(f"订单状态: {order_status}")
+                        
+                        # 检查订单是否已经被填充
+                        if "filled" in order_status["statuses"][0]:
+                            logger.info(f"订单已成功填充: {order_id}")
+                            order_success = True
+                        elif "cancelled" in order_status["statuses"][0]:
+                            logger.warning(f"订单已被取消: {order_id}")
+                            # 取消的订单需要重试
+                            retry_count += 1
+                        else:
+                            # 订单仍在等待中，尝试取消并重试
+                            logger.warning(f"订单未被填充，尝试取消: {order_id}")
+                            cancel_res = exchange.cancel_order(ticker, order_id)
+                            logger.info(f"取消订单结果: {cancel_res}")
+                            retry_count += 1
+                    elif "filled" in status:
+                        logger.info(f"订单立即成功填充")
+                        order_success = True
+                    else:
+                        logger.warning(f"订单状态未知: {status}")
+                        retry_count += 1
+                else:
+                    logger.error(f"下单失败: {order_res}")
+                    retry_count += 1
+                    
+                # 如果需要重试，等待一段时间
+                if not order_success and retry_count < max_retries:
+                    logger.info(f"等待 {retry_interval} 秒后重试...")
+                    time.sleep(retry_interval)
+                    
+            except Exception as e:
+                logger.error(f"下单过程中发生错误: {str(e)}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.info(f"等待 {retry_interval} 秒后重试...")
+                    time.sleep(retry_interval)
+        
+        if order_success:
+            logger.info(f"套利方平仓订单成功执行，价格: {_target_price}")
+            return _target_price, True
+        else:
+            logger.error(f"达到最大重试次数 {max_retries}，套利方平仓订单未能成功执行")
+            return _target_price, False
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res}")
-        return -1
+        return -1, False
 
 
-def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
+def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price, max_retries=5, retry_interval=3):
     """Hyper Liquid对冲方平仓
     
     Args:
@@ -378,12 +572,16 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
         ticker (str): 目标标的，如"BTC"
         arb_open_price (float): 套利方开仓价格
         arb_close_price (float): 套利方平仓价格
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为3秒
         
     Returns:
-        float: 对冲方平仓价格，失败时返回-1
+        tuple: 包含对冲方平仓价格和成功状态的元组
+            - target_price (float): 对冲方平仓价格
+            - success (bool): 订单是否成功填充
     """
     _account, _address = fetch_account_address()
-    _info = Info(constants.TESTNET_API_URL, skip_ws=True)
+    _info = Info(constants.MAINNET_API_URL if net else constants.TESTNET_API_URL, skip_ws=True)
     base_url = HyperLiquidApiConfig(net).get_rest_url()
 
     url = base_url + '/info'
@@ -420,67 +618,126 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
         _target_record = df[df['name'] == ticker]
         _decimals = _target_record.iloc[0]['szDecimals']  # 获取该标的的小数位信息
 
-        # TODO 检查价格计算逻辑
-        # 计算当前市场价下的平仓价格
-        current_market_price = retrieve_price(
-            ticker=ticker, 
-            base_url=base_url,
-            side=side,
-            decimals=_decimals
-        )
-
-        # 计算价格风险完全对冲的平仓价格
-        hedge_price = arb_close_price + hedge_open_price - arb_open_price
-        
-        # 计算最终的平仓价格
-        if side:
-            # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
-            _target_price = min(hedge_price, current_market_price)
-        else:
-            # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
-            _target_price = max(hedge_price, current_market_price)
-        
-        logger.info(
-            f"市场价格: {current_market_price}, "
-            f"风险完全对冲价格: {hedge_price}, "
-            f"最终平仓价格: {_target_price}, "
-            f"平仓数量: {hedge_size}, "
-            f"利润: {pnl}, "
-            f"平仓方向: {side}"
-        )
-
         # 创建Exchange类
         exchange = Exchange(_account, base_url, account_address=_address)
-        # 平仓
-        order_res = exchange.order(
-            ticker,
-            side,
-            hedge_size,
-            _target_price,
-            {"limit": {"tif": "Gtc"}}
-        )
-        logger.info(f"下单结果: {order_res}")
+        
+        # 订单成功标志
+        order_success = False
+        # 订单ID
+        order_id = None
+        # 重试计数
+        retry_count = 0
+        # 目标价格
+        _target_price = None
+        
+        while not order_success and retry_count < max_retries:
+            try:
+                # 计算当前市场价下的平仓价格
+                current_market_price = retrieve_price(
+                    ticker=ticker, 
+                    base_url=base_url,
+                    side=side,
+                    decimals=_decimals
+                )
 
-        # Query the order status by oid
-        if order_res["status"] == "ok":
-            status = order_res["response"]["data"]["statuses"][0]
-            if "resting" in status:
-                order_status = _info.query_order_by_oid(_address, status["resting"]["oid"])
-                logger.info(f"订单状态: {order_status}")
-            
-        return _target_price
+                # 计算价格风险完全对冲的平仓价格
+                hedge_price = arb_close_price + hedge_open_price - arb_open_price
+                
+                # 计算最终的平仓价格
+                if side:
+                    # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
+                    _target_price = min(hedge_price, current_market_price)
+                else:
+                    # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
+                    _target_price = max(hedge_price, current_market_price)
+                
+                logger.info(
+                    f"尝试 #{retry_count+1}: "
+                    f"市场价格: {current_market_price}, "
+                    f"风险完全对冲价格: {hedge_price}, "
+                    f"最终平仓价格: {_target_price}, "
+                    f"平仓数量: {hedge_size}, "
+                    f"利润: {pnl}, "
+                    f"平仓方向: {side}"
+                )
+
+                # 下单
+                order_res = exchange.order(
+                    ticker,
+                    side,
+                    hedge_size,
+                    _target_price,
+                    {"limit": {"tif": "Gtc"}}
+                )
+                logger.info(f"下单结果: {order_res}")
+
+                # 检查订单状态
+                if order_res["status"] == "ok":
+                    status = order_res["response"]["data"]["statuses"][0]
+                    if "resting" in status:
+                        order_id = status["resting"]["oid"]
+                        
+                        # 等待一段时间，让订单有机会被填充
+                        time.sleep(retry_interval)
+                        
+                        # 查询订单状态
+                        order_status = _info.query_order_by_oid(_address, order_id)
+                        logger.info(f"订单状态: {order_status}")
+                        
+                        # 检查订单是否已经被填充
+                        if "filled" in order_status["statuses"][0]:
+                            logger.info(f"订单已成功填充: {order_id}")
+                            order_success = True
+                        elif "cancelled" in order_status["statuses"][0]:
+                            logger.warning(f"订单已被取消: {order_id}")
+                            # 取消的订单需要重试
+                            retry_count += 1
+                        else:
+                            # 订单仍在等待中，尝试取消并重试
+                            logger.warning(f"订单未被填充，尝试取消: {order_id}")
+                            cancel_res = exchange.cancel_order(ticker, order_id)
+                            logger.info(f"取消订单结果: {cancel_res}")
+                            retry_count += 1
+                    elif "filled" in status:
+                        logger.info(f"订单立即成功填充")
+                        order_success = True
+                    else:
+                        logger.warning(f"订单状态未知: {status}")
+                        retry_count += 1
+                else:
+                    logger.error(f"下单失败: {order_res}")
+                    retry_count += 1
+                    
+                # 如果需要重试，等待一段时间
+                if not order_success and retry_count < max_retries:
+                    logger.info(f"等待 {retry_interval} 秒后重试...")
+                    time.sleep(retry_interval)
+                    
+            except Exception as e:
+                logger.error(f"下单过程中发生错误: {str(e)}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.info(f"等待 {retry_interval} 秒后重试...")
+                    time.sleep(retry_interval)
+        
+        if order_success:
+            logger.info(f"对冲方平仓订单成功执行，价格: {_target_price}")
+            return _target_price, True
+        else:
+            logger.error(f"达到最大重试次数 {max_retries}，对冲方平仓订单未能成功执行")
+            return _target_price, False
     else:
         logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res}")
-        return -1
+        return -1, False
 
 
 if __name__ == "__main__":
     print("Hyper Liquid Trading Test")
-    # arb_open_price, arb_size = open_position_arb(
-    #     base_url=TESTNET_API_URL,
-    #     side=False,
-    #     ticker="BTC"
-    # )
+    arb_open_price, arb_size = open_position_arb(
+        net=False,
+        side=False,
+        ticker="BTC"
+    )
 
     # arb_close_price = close_position_arb(
     #     base_url=TESTNET_API_URL,

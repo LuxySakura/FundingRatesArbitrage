@@ -153,8 +153,9 @@ def next_ft_filter(_row):
     
     # 单平台情况处理
     if len(valid_platforms) == 1:
+        print("Hyper Liquid Only Arbitrage")
         platform, fr_value = next(iter(valid_platforms.items()))
-        # print("Hl FR:", fr_value)
+        print("Hl FR:", fr_value)
         lowest_fee_platform = Platform.get_lowest_fee_platform_with_valid_fr(_row)
         
         if lowest_fee_platform == Platform.UNKNOWN:
@@ -168,6 +169,7 @@ def next_ft_filter(_row):
         
         # 计算净收益
         max_fr = 3*abs(fr_value) - arb_platform.fee - lowest_fee_platform.fee
+        print("\tNet Funding Rate:", max_fr)
         
         return make_result(max_fr, arb_platform, lowest_fee_platform)
     
@@ -229,18 +231,24 @@ def max_funding_rate(data):
     max_fr_idx = data['maxFR'].idxmax()
     print(data['maxFR'].describe())
     max_record = data.loc[max_fr_idx]
-    print("Best Funding Rate Arbitrage:\n", max_record)
-    _arb_platform = max_record['arb_obj']
-    _hedge_platform = max_record['hedge_obj']
-    _ticker = max_record['ticker']
 
-    _arb_obj, _hedge_obj = create_trading_pair(_arb_platform, _hedge_platform, max_record[f'{_arb_platform}FR'], max_record[f'{_hedge_platform}FR'])
+    # 如果此时maxFR <= 0, 则无有效交易对
+    if max_record['maxFR'] <= 0:
+        print("No Valid Ticker Found")
+        return 0, None, None, None
+    else:
+        print("Best Funding Rate Arbitrage:\n", max_record)
+        _arb_platform = max_record['arb_obj']
+        _hedge_platform = max_record['hedge_obj']
+        _ticker = max_record['ticker']
+
+        _arb_obj, _hedge_obj = create_trading_pair(_arb_platform, _hedge_platform, max_record[f'{_arb_platform}FR'], max_record[f'{_hedge_platform}FR'])
     
-    # Print Arbitrage Strategy
-    _arb_obj.strategyState()
-    _hedge_obj.strategyState()
-    return max_record['maxFR'], _arb_obj, _hedge_obj, _ticker
-
+        # Print Arbitrage Strategy
+        _arb_obj.strategyState()
+        _hedge_obj.strategyState()
+        return max_record['maxFR'], _arb_obj, _hedge_obj, _ticker
+    
 
 if __name__ == '__main__':
     file_path = './data/funding_data.csv'  # CSV 文件路径
@@ -250,7 +258,7 @@ if __name__ == '__main__':
     max_fr, arb, hedge, ticker = max_funding_rate(data)
     max_fr = float(max_fr) * 100
     # 估算日利润率: max_fr * 日执行次数 * 资金杠杆
-    estimate_day_rate = max_fr * 12 * 5
+    estimate_day_rate = 0.1 * 12 * 3
 
     print("Max Funding Rate:", max_fr, "From:", ticker)
     print("Estimated Max Funding Rate(Per Day):", estimate_day_rate, "%")

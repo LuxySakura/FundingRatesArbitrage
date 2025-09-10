@@ -415,6 +415,115 @@ async def retrieve_price(base_url, symbol, side):
     return target_price
 
 
+def query_order_status(base_url, api_key, secret_key, order_id):
+    """查询订单状态
+    
+    Args:
+        base_url (str): Bybit API的基础URL
+        api_key (str): Bybit API密钥
+        secret_key (str): Bybit API密钥对应的私钥
+        order_id (str): 订单ID
+        
+    Returns:
+        str: 订单状态，如"Filled"、"PartiallyFilled"、"New"等，失败时返回None
+    """
+    method = 'GET'
+    request_path = '/v5/order/history'
+    timestamp = get_server_time(base_url)
+    body = {
+        'category': 'linear',
+        'orderId': order_id
+    }
+
+    sign = generate_sign(api_key, secret_key, timestamp, method, body)
+
+    url = base_url + request_path
+    
+    headers = {
+        'Content-Type': "application/json",
+        'X-BAPI-API-KEY': api_key,
+        'X-BAPI-SIGN': sign,
+        'X-BAPI-TIMESTAMP': timestamp,
+    }
+    
+    try:
+        res = requests.get(
+            url,
+            headers=headers,
+            params=body
+        )
+        
+        if res.status_code == 200:
+            data = res.json()
+            if data['retCode'] == 0 and data['result']['list']:
+                order_status = data['result']['list'][0]['orderStatus']
+                logger.info(f"订单状态: {order_status}")
+                return order_status
+            else:
+                logger.error(f"查询订单状态失败: {data}")
+                return None
+        else:
+            logger.error(f"API请求失败: 状态码 {res.status_code}, 响应: {res.text}")
+            return None
+    except Exception as e:
+        logger.error(f"查询订单状态异常: {str(e)}")
+        return None
+
+
+def cancel_order(base_url, api_key, secret_key, order_id):
+    """取消订单
+    
+    Args:
+        base_url (str): Bybit API的基础URL
+        api_key (str): Bybit API密钥
+        secret_key (str): Bybit API密钥对应的私钥
+        order_id (str): 订单ID
+        
+    Returns:
+        bool: 操作结果，True表示成功，False表示失败
+    """
+    timestamp = get_server_time(base_url)
+
+    # 正确的API路径
+    url = base_url + '/v5/order/cancel'
+
+    body = {
+        "category": "linear",
+        "orderId": order_id
+    }
+    json_body = json.dumps(body)
+
+    # 生成签名
+    sign = generate_sign(
+        timestamp=timestamp, api_key=api_key, secret_key=secret_key, 
+        method='POST', body=json_body
+    )
+
+    headers = {
+        'Content-Type': "application/json",
+        'X-BAPI-API-KEY': api_key,
+        'X-BAPI-SIGN': sign,
+        'X-BAPI-TIMESTAMP': timestamp,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=json_body)
+        if response.status_code == 200:
+            data = response.json()
+            if data['retCode'] == 0:
+                logger.info(f"取消订单成功: {data}")
+                return True
+            else:
+                logger.error(f"取消订单失败: {data}")
+                return False
+        else:
+            logger.error(f"API请求失败: 状态码 {response.status_code}, 响应: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"取消订单异常: {str(e)}")
+        return False
+
+
 def place_trade(base_url, api_key, secret_key, price, side, symbol, size):
     """下单交易
     
@@ -428,7 +537,7 @@ def place_trade(base_url, api_key, secret_key, price, side, symbol, size):
         size (float): 下单数量
         
     Returns:
-        int: 操作结果，0表示成功，-1表示失败
+        str: 订单ID，失败时返回None
     """
     side_enum = "Buy" if side else "Sell"
 
@@ -465,20 +574,21 @@ def place_trade(base_url, api_key, secret_key, price, side, symbol, size):
         if response.status_code == 200:
             data = response.json()
             if data['retCode'] == 0:
+                order_id = data['result']['orderId']
                 logger.info(f"下单成功: {data}")
-                return 0
+                return order_id
             else:
                 logger.error(f"下单失败: {data}")
-                return -1
+                return None
         else:
             logger.error(f"API请求失败: 状态码 {response.status_code}, 响应: {response.text}")
-            return -1
+            return None
     except Exception as e:
         logger.error(f"下单异常: {str(e)}")
-        return -1
+        return None
 
 
-def open_position_arb(net, side, ticker):
+def open_position_arb(net, side, ticker, max_retries=5, retry_interval=5):
     """
     Bybit 套利方开仓
     
@@ -486,6 +596,8 @@ def open_position_arb(net, side, ticker):
         net (bool): Bybit 的API URL类型，True为主网，False为测试网
         side (bool): 开仓方向，True为买入开仓，False为卖出开仓
         ticker (str): 目标标的，如"BTC"
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为5秒
         
     Returns:
         tuple: 包含开仓价格和开仓数量的元组
@@ -498,7 +610,6 @@ def open_position_arb(net, side, ticker):
     ws_base_url = config.get_ws_url()  # 获取WebSocket的基础URL
     api_key, secret_key = fetch_api_key(net)  # 获取API Key和Secret Key
     target_perp = ticker+"USDT"  # 根据ticker构建出目标perp的币对
-
 
     # 查询账户余额
     fund = query_balance(rest_base_url, api_key, secret_key)  # 查询账户余额
@@ -513,31 +624,72 @@ def open_position_arb(net, side, ticker):
         target_perp, str(POSITION_LEVERAGE)
     )
 
-    # 计算开仓价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )  # 获取目标价格
-
     # 计算开仓数量
     size_decimals = query_symbol_size(rest_base_url, target_perp)  # 获取标的的最小价格变动和最小数量变动
-    target_size = set_size(position_fund, POSITION_LEVERAGE, target_price, size_decimals)  # 计算开仓数量
     
-    logger.info(
-        f"套利方开仓价格: {target_price}, "
-        f"套利方开仓数量: {target_size}, "
-        f"套利方开仓杠杆: {POSITION_LEVERAGE}"
-    )
+    # 尝试下单，直到成功或达到最大重试次数
+    for attempt in range(max_retries):
+        # 计算开仓价格（每次重试都重新获取价格）
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )  # 获取目标价格
+        
+        # 计算开仓数量
+        target_size = set_size(position_fund, POSITION_LEVERAGE, target_price, size_decimals)  # 计算开仓数量
+        
+        logger.info(
+            f"套利方开仓尝试 #{attempt+1}: "
+            f"开仓价格: {target_price}, "
+            f"开仓数量: {target_size}, "
+            f"开仓杠杆: {POSITION_LEVERAGE}"
+        )
 
-    # 下单
-    place_trade(
-        rest_base_url, api_key, secret_key, 
-        target_price, side, target_perp, target_size
-    )
+        # 下单
+        order_id = place_trade(
+            rest_base_url, api_key, secret_key, 
+            target_price, side, target_perp, target_size
+        )
+        
+        if not order_id:
+            logger.warning(f"下单失败，{retry_interval}秒后重试...")
+            time.sleep(retry_interval)
+            continue
+            
+        # 等待订单填充
+        filled = False
+        check_attempts = 10  # 检查订单状态的次数
+        for check in range(check_attempts):
+            order_status = query_order_status(rest_base_url, api_key, secret_key, order_id)
+            
+            if order_status == "Filled":
+                logger.info(f"订单已完全成交")
+                filled = True
+                break
+            elif order_status in ["Cancelled", "Rejected"]:
+                logger.warning(f"订单被取消或拒绝: {order_status}")
+                break
+            elif order_status == "PartiallyFilled":
+                logger.info(f"订单部分成交，继续等待...")
+            else:
+                logger.info(f"订单状态: {order_status}，继续等待...")
+                
+            time.sleep(retry_interval)
+        
+        if filled:
+            logger.info(f"套利方开仓成功: 价格={target_price}, 数量={target_size}")
+            return target_price, target_size
+        else:
+            logger.warning(f"订单未完全成交，尝试取消订单并重新下单...")
+            # 这里可以添加取消订单的逻辑
+            # cancel_order(rest_base_url, api_key, secret_key, order_id)
+            time.sleep(retry_interval)
+    
+    # 如果所有尝试都失败
+    logger.error(f"在{max_retries}次尝试后仍未能成功开仓")
+    return -1, -1
 
-    return target_price, target_size
 
-
-def open_position_hedge(net, side, ticker, arb_size):
+def open_position_hedge(net, side, ticker, arb_size, max_retries=5, retry_interval=5):
     """
     Bybit对冲方开仓
     
@@ -546,9 +698,11 @@ def open_position_hedge(net, side, ticker, arb_size):
         side (bool): 开仓方向，True为买入开仓，False为卖出开仓
         ticker (str): 目标标的，如"BTC"
         arb_size (float): 套利方开仓张数
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为5秒
         
     Returns:
-        float: 对冲方开仓价格
+        float: 对冲方开仓价格，失败时返回-1
     """
     # 获取配置信息
     config = BybitApiConfig(net)  # 初始化网络信息
@@ -562,28 +716,69 @@ def open_position_hedge(net, side, ticker, arb_size):
         rest_base_url, api_key, secret_key, 
         target_perp, str(POSITION_LEVERAGE)
     )
+    
+    # 尝试下单，直到成功或达到最大重试次数
+    for attempt in range(max_retries):
+        # 计算价格（每次重试都重新获取价格）
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
+        
+        logger.info(
+            f"对冲方开仓尝试 #{attempt+1}: "
+            f"开仓价格: {target_price}, "
+            f"开仓数量: {arb_size}, "
+            f"开仓杠杆: {POSITION_LEVERAGE}"
+        )
 
-    # 计算价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
+        # 下单
+        order_id = place_trade(
+            base_url=rest_base_url,
+            api_key=api_key, secret_key=secret_key,
+            price=target_price, side=side,
+            symbol=target_perp, size=arb_size
+        )
+        
+        if not order_id:
+            logger.warning(f"下单失败，{retry_interval}秒后重试...")
+            time.sleep(retry_interval)
+            continue
+            
+        # 等待订单填充
+        filled = False
+        check_attempts = 10  # 检查订单状态的次数
+        for check in range(check_attempts):
+            order_status = query_order_status(rest_base_url, api_key, secret_key, order_id)
+            
+            if order_status == "Filled":
+                logger.info(f"订单已完全成交")
+                filled = True
+                break
+            elif order_status in ["Cancelled", "Rejected"]:
+                logger.warning(f"订单被取消或拒绝: {order_status}")
+                break
+            elif order_status == "PartiallyFilled":
+                logger.info(f"订单部分成交，继续等待...")
+            else:
+                logger.info(f"订单状态: {order_status}，继续等待...")
+                
+            time.sleep(retry_interval)
+        
+        if filled:
+            logger.info(f"对冲方开仓成功: 价格={target_price}, 数量={arb_size}")
+            return target_price
+        else:
+            logger.warning(f"订单未完全成交，尝试取消订单并重新下单...")
+            # 取消订单
+            cancel_order(rest_base_url, api_key, secret_key, order_id)
+            time.sleep(retry_interval)
+    
+    # 如果所有尝试都失败
+    logger.error(f"在{max_retries}次尝试后仍未能成功开仓")
+    return -1
 
-    logger.info(
-        f"对冲方开仓价格: {target_price}, "
-        f"对冲方开仓数量: {arb_size}, "
-        f"对冲方开仓杠杆: {POSITION_LEVERAGE}"
-    )
 
-    # 下单
-    place_trade(
-        base_url=rest_base_url,
-        api_key=api_key, secret_key=secret_key,
-        price=target_price, side=side,
-        symbol=target_perp, size=arb_size
-    )
-
-
-def close_position_arb(net, side, ticker):
+def close_position_arb(net, side, ticker, max_retries=5, retry_interval=5):
     """
     Bybit套利方平仓
     
@@ -591,9 +786,13 @@ def close_position_arb(net, side, ticker):
         net (bool): Bybit的API URL类型，True为主网，False为测试网
         side (bool): 平仓方向，True为买入平仓，False为卖出平仓
         ticker (str): 目标标的，如"BTC"
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为5秒
         
     Returns:
-        int: 操作结果，0表示成功
+        tuple: 包含操作结果和平仓价格的元组
+            - result (int): 操作结果，0表示成功，-1表示失败
+            - close_price (float): 平仓价格，失败时返回-1
     """
     # 获取配置信息
     config = BybitApiConfig(net)  # 初始化网络信息
@@ -609,29 +808,73 @@ def close_position_arb(net, side, ticker):
         symbol=target_perp
     )
     
-    # 计算平仓价格
-    target_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
+    if float(size) <= 0 or open_price == -1:
+        logger.error(f"获取仓位信息失败或无仓位")
+        return -1, -1
+    
+    # 尝试平仓，直到成功或达到最大重试次数
+    for attempt in range(max_retries):
+        # 计算平仓价格（每次重试都重新获取价格）
+        target_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
+        
+        logger.info(
+            f"套利方平仓尝试 #{attempt+1}: "
+            f"平仓价格: {target_price}, "
+            f"平仓数量: {size}, "
+            f"平仓方向: {side}"
+        )
+        
+        # 下单平仓
+        order_id = place_trade(
+            base_url=rest_base_url,
+            api_key=api_key, secret_key=secret_key,
+            price=target_price, side=side,
+            symbol=target_perp, size=size
+        )
+        
+        if not order_id:
+            logger.warning(f"平仓下单失败，{retry_interval}秒后重试...")
+            time.sleep(retry_interval)
+            continue
+            
+        # 等待订单填充
+        filled = False
+        check_attempts = 10  # 检查订单状态的次数
+        for check in range(check_attempts):
+            order_status = query_order_status(rest_base_url, api_key, secret_key, order_id)
+            
+            if order_status == "Filled":
+                logger.info(f"平仓订单已完全成交")
+                filled = True
+                break
+            elif order_status in ["Cancelled", "Rejected"]:
+                logger.warning(f"平仓订单被取消或拒绝: {order_status}")
+                break
+            elif order_status == "PartiallyFilled":
+                logger.info(f"平仓订单部分成交，继续等待...")
+            else:
+                logger.info(f"平仓订单状态: {order_status}，继续等待...")
+                
+            time.sleep(retry_interval)
+        
+        if filled:
+            logger.info(f"套利方平仓成功: 价格={target_price}")
+            return 0, target_price
+        else:
+            logger.warning(f"平仓订单未完全成交，尝试取消订单并重新下单...")
+            # 取消订单
+            cancel_order(rest_base_url, api_key, secret_key, order_id)
+            time.sleep(retry_interval)
+    
+    # 如果所有尝试都失败
+    logger.error(f"在{max_retries}次尝试后仍未能成功平仓")
+    return -1, -1
 
-    logger.info(
-        f"套利方平仓价格: {target_price}, "
-        f"套利方平仓数量: {size}, "
-        f"套利方平仓方向: {side}"
-     )
 
-    # 下单平仓
-    place_trade(
-        base_url=rest_base_url,
-        api_key=api_key, secret_key=secret_key,
-        price=target_price, side=side,
-        symbol=target_perp, size=size
-    )
-    return 0
-
-
-def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
-    """Binance对冲方平仓
+def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price, max_retries=5, retry_interval=5):
+    """Bybit对冲方平仓
     
     Args:
         net (bool): Bybit的API URL类型，True为主网，False为测试网
@@ -639,9 +882,11 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
         ticker (str): 目标标的，如"BTC"
         arb_open_price (float): 套利方开仓价格
         arb_close_price (float): 套利方平仓价格
+        max_retries (int, optional): 最大重试次数，默认为5次
+        retry_interval (int, optional): 重试间隔时间(秒)，默认为5秒
         
     Returns:
-        int: 操作结果，0表示成功
+        int: 操作结果，0表示成功，-1表示失败
     """
     # 获取配置信息
     config = BybitApiConfig(net)  # 初始化网络信息
@@ -656,46 +901,90 @@ def close_position_hedge(net, side, ticker, arb_open_price, arb_close_price):
         api_key, secret_key,
         target_perp
     )
-
-    # 计算当前市场价下的平仓价格
-    current_market_price = asyncio.run(
-        retrieve_price(ws_base_url, target_perp, side)
-    )
-    # 计算价格风险完全对冲的平仓价格
-    hedge_price = arb_close_price + hedge_open_price - arb_open_price
-
-    # 计算最终的平仓价格
-    if side:
-        # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
-        target_price = min(hedge_price, current_market_price)
-    else:
-        # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
-        target_price = max(hedge_price, current_market_price)
     
-    logger.info(
-        f"市场价格: {current_market_price}, "
-        f"风险完全对冲价格: {hedge_price}, "
-        f"最终平仓价格: {target_price}, "
-        f"平仓数量: {hedge_size}, "
-        f"平仓方向: {side}"
-     )
+    if float(hedge_size) <= 0 or hedge_open_price == -1:
+        logger.error(f"获取仓位信息失败或无仓位")
+        return -1
     
-    # 下单平仓
-    place_trade(
-        base_url=rest_base_url,
-        api_key=api_key, secret_key=secret_key,
-        price=target_price, side=side,
-        symbol=target_perp, size=hedge_size
-    )
+    # 尝试平仓，直到成功或达到最大重试次数
+    for attempt in range(max_retries):
+        # 计算当前市场价下的平仓价格
+        current_market_price = asyncio.run(
+            retrieve_price(ws_base_url, target_perp, side)
+        )
+        
+        # 计算价格风险完全对冲的平仓价格
+        hedge_price = arb_close_price + hedge_open_price - arb_open_price
 
-    return 0
+        # 计算最终的平仓价格
+        if side:
+            # 如果side为True，即对冲方平仓方向为Long，则开仓方向为Short，则应取二者的较小值
+            target_price = min(hedge_price, current_market_price)
+        else:
+            # 反之side为False，即对冲方平仓方向为Short，则开仓方向为Long，则应取二者的较大值
+            target_price = max(hedge_price, current_market_price)
+        
+        logger.info(
+            f"对冲方平仓尝试 #{attempt+1}: "
+            f"市场价格: {current_market_price}, "
+            f"风险完全对冲价格: {hedge_price}, "
+            f"最终平仓价格: {target_price}, "
+            f"平仓数量: {hedge_size}, "
+            f"平仓方向: {side}"
+        )
+        
+        # 下单平仓
+        order_id = place_trade(
+            base_url=rest_base_url,
+            api_key=api_key, secret_key=secret_key,
+            price=target_price, side=side,
+            symbol=target_perp, size=hedge_size
+        )
+        
+        if not order_id:
+            logger.warning(f"平仓下单失败，{retry_interval}秒后重试...")
+            time.sleep(retry_interval)
+            continue
+            
+        # 等待订单填充
+        filled = False
+        check_attempts = 10  # 检查订单状态的次数
+        for check in range(check_attempts):
+            order_status = query_order_status(rest_base_url, api_key, secret_key, order_id)
+            
+            if order_status == "Filled":
+                logger.info(f"平仓订单已完全成交")
+                filled = True
+                break
+            elif order_status in ["Cancelled", "Rejected"]:
+                logger.warning(f"平仓订单被取消或拒绝: {order_status}")
+                break
+            elif order_status == "PartiallyFilled":
+                logger.info(f"平仓订单部分成交，继续等待...")
+            else:
+                logger.info(f"平仓订单状态: {order_status}，继续等待...")
+                
+            time.sleep(retry_interval)
+        
+        if filled:
+            logger.info(f"对冲方平仓成功: 价格={target_price}")
+            return 0
+        else:
+            logger.warning(f"平仓订单未完全成交，尝试取消订单并重新下单...")
+            # 取消订单
+            cancel_order(rest_base_url, api_key, secret_key, order_id)
+            time.sleep(retry_interval)
+    
+    # 如果所有尝试都失败
+    logger.error(f"在{max_retries}次尝试后仍未能成功平仓")
+    return -1
 
 
 if __name__ == "__main__":
     # 示例用法
     print("<==== Testing Bybit Perp Trade ====>")
     # open_position_arb(False, True, "BTC")
-    target_price = asyncio.run(
-        retrieve_price('wss://stream.bybit.com/v5', 'GASUSDT', True)
-    )
+    # target_price = asyncio.run(
+    #     retrieve_price('wss://stream.bybit.com/v5', 'GASUSDT', True)
+    # )
     print("<==== Testing Bybit Perp Trade End ====>")

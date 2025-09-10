@@ -29,6 +29,7 @@ def max_analyze_funding_rate():
     data['HlFR'] = data['HlFR'].fillna(0)
     
     # 计算每四小时的资金套利费率（取绝对值）
+    
     data['bin_Arb_FR'] = abs(data['BinFR'] - data['HlFR']) - HL_COMMISSTION_FEE - BN_COMMISION_FEE
     data['bybit_Arb_FR'] = abs(data['BybitFR'] - data['HlFR']) - HL_COMMISSTION_FEE - BYBIT_COMMISION_FEE
     data['okx_Arb_FR'] = abs(data['OkxFR'] - data['HlFR']) - HL_COMMISSTION_FEE - OKX_COMMISION_FEE
@@ -41,7 +42,10 @@ def max_analyze_funding_rate():
     
     print("最大套利差值记录:")
     print(max_arb_record)
-    print(f"最大套利差值: {max_arb_record['max_Arb_FR']}")
+    print("BIN-HL 套利费率:", max_arb_record['BinFR'] - max_arb_record['HlFR'])
+    print("BYBIT-HL 套利费率:", max_arb_record['BybitFR'] - max_arb_record['HlFR'])
+    print("OKX-HL 套利费率:", max_arb_record['OkxFR'] - max_arb_record['HlFR'])
+    print(f"最大套利差值: {max_arb_record['max_Arb_FR']*100}%")
     
     # 确定最大套利差值来自哪个交易所对
     max_pair = ""
@@ -118,4 +122,4 @@ def analyze_unmatched_timestamp():
 
 
 if __name__ == '__main__':
-    analyze_unmatched_timestamp()
+    max_analyze_funding_rate()

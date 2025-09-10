@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-POSITION_RISK = 0.05  # 风险度，每次开仓的保证金占比
+POSITION_RISK = 0.5  # 风险度，每次开仓的保证金占比
 POSITION_LEVERAGE = 2  # 开仓杠杆
 
 # 创建交易平台API配置的抽象基类

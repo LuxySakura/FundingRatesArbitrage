@@ -137,7 +137,7 @@ def fetch_okx_funding_rates(ticker):
         return None, None
 
 
-def fetch_hl_ticker_index(url):
+def fetch_hl_ticker_index(net):
     """
     获取Hyper Liquid上的所有ticker在universe上的index，方便后续根据index提取价格信息
     """
@@ -147,6 +147,13 @@ def fetch_hl_ticker_index(url):
     body = {
         'type': "meta"
     }
+
+    if net:
+        url = HL_MAINNET_URL
+        csv_path = './data/hl_ticker_index_mainnet.csv'
+    else:
+        url = HL_TESTNET_URL
+        csv_path = './data/hl_ticker_index_testnet.csv'
 
     res = requests.post(
         url, 
@@ -174,7 +181,6 @@ def fetch_hl_ticker_index(url):
         df = pd.DataFrame(extracted_data)
         
         # 保存为CSV文件
-        csv_path = './data/hl_ticker_index.csv'
         df.to_csv(csv_path, index=False)
         print(f"测试数据已保存至: {csv_path}")
 
@@ -296,9 +302,11 @@ def fetch_bybit_perps():
 
 
 if __name__ == '__main__':
-    # fetch_funding_rates()
+    fetch_funding_rates()
+    # 获取Hyper Liquid上所有的perp标的，并将结果存储在"./data/hl_ticker_index_mainnet.csv中"
+    fetch_hl_ticker_index(net=True)
     # fetch_bin_perps()
     # fetch_bybit_perps()
 
-    data = pd.read_csv('./data/bybit_perps.csv')
-    filter_usdc_pairs(data)
+    # data = pd.read_csv('./data/bybit_perps.csv')
+    # filter_usdc_pairs(data)

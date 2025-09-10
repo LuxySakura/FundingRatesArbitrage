@@ -138,25 +138,21 @@ if __name__ == '__main__':
     #     logger.error(f"程序异常退出: {str(e)}", exc_info=True)
     # finally:
     #     logger.info("=== 套利程序结束 ===")
-    # open_price, open_size = hl_perp_trade.open_position_arb(
-    #     net=True, side=False, ticker="GAS"
+    # open_price, open_size = bin_perp_trade.open_position_arb(
+    #     net=True, side=True, ticker="REZ"
     # )
     # logger.info(f"套利方开仓价格: {open_price}, 开仓张数: {open_size}")
 
-    # hedge_open_price = bin_perp_trade.open_position_hedge(
-    #     net=True, side=True, ticker="GAS", arb_size=7.1
-    # )
-    # logger.info(f"对冲方开仓价格: {hedge_open_price}, 开仓张数: ")
+    hedge_open_price = hl_perp_trade.open_position_hedge(
+        net=True, side=False, ticker="REZ", arb_size=1443
+    )
+    logger.info(f"对冲方开仓价格: {hedge_open_price}, 开仓张数: ")
 
     # arb_close_price = hl_perp_trade.close_position_arb(
     #     net=True, side=True, ticker="GAS"
     # )
 
-    bin_perp_trade.close_position_hedge(
-        net=True, side=False, ticker="GAS", 
-        arb_open_price=2.5383, arb_close_price=2.4899
-    )
-
-
-
-    
+    # bin_perp_trade.close_position_hedge(
+    #     net=True, side=False, ticker="GAS", 
+    #     arb_open_price=2.5383, arb_close_price=2.4899
+    # )
